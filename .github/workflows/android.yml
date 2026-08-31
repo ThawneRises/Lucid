@@ -1,0 +1,109 @@
+name: Lucid Gallery Release Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build & Deploy Lucid
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Cache Android SDK & Build Files
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.android/sdk
+            ~/.gradle/caches/build-cache-1
+            ~/.gradle/caches/modules-2
+            build/.gradle
+          key: ${{ runner.os }}-android-build-${{ hashFiles('**/build.gradle.kts', '**/libs.versions.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-android-build-
+            ${{ runner.os }}-android-
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Decode Keystore from Base64
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > gallery-key.jks
+
+      - name: Create keystore.properties
+        run: |
+          cat > keystore.properties << EOF
+          storeFile=./gallery-key.jks
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          EOF
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+
+      - name: Build Signed Release APK
+        id: build
+        run: |
+          ./gradlew --no-daemon --parallel --stacktrace :app:assembleRelease 2>&1 | tee Lucid-Gallery-Build.log
+
+          mv app/build/outputs/apk/release/app-release.apk Lucid-Gallery.apk
+
+      - name: Send Failed Build Log to Telegram
+        if: failure()
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TEST_BUILDS }}
+        run: |
+          curl --silent --show-error \
+            -F chat_id="$CHAT_ID" \
+            -F parse_mode=HTML \
+            -F "caption=<b>❌ Lucid Gallery release build failed</b>" \
+            -F document=@Lucid-Gallery-Build.log \
+            "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument"
+
+      - name: Parse Commit & Send APK to Telegram
+        if: success()
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TEST_BUILDS }}
+        run: |
+          FULL_COMMIT="$(git log -1 --pretty=%B)"
+
+          SAFE_COMMIT=$(echo "$FULL_COMMIT" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')
+
+          CAPTION="<b>✅ Lucid Gallery Built Successfully</b>
+
+          <b>Commit:</b>
+          $SAFE_COMMIT"
+
+          echo "$CAPTION" > caption.txt
+
+          curl --silent --show-error \
+            -F chat_id="$CHAT_ID" \
+            -F parse_mode=HTML \
+            -F "caption=<caption.txt" \
+            -F document=@Lucid-Gallery.apk \
+            "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument"
+
+      - name: Upload APK as Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lucid-Gallery-Release-apk
+          path: Lucid-Gallery.apk
+          retention-days: 14
