@@ -2,10 +2,10 @@ package com.lucid.gallery.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val Paper = Color(0xFFF3F0E9) // Warm paper surface
-val Ink = Color(0xFF202522) // Dark ink typography
-val Moss = Color(0xFF687A55) // Labels
-val Coral = Color(0xFFD9684A) // Actions
+val Paper = Color(0xFFF3F0E9)
+val Ink = Color(0xFF202522)
+val Moss = Color(0xFF687A55)
+val Coral = Color(0xFFD9684A)
 
 val Black = Color(0xFF000000)
 val DarkSurface = Color(0xFF1A1A1A)

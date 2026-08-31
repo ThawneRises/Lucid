@@ -37,29 +37,17 @@ jobs:
             ~/.gradle/caches/build-cache-1
             ~/.gradle/caches/modules-2
             build/.gradle
-          key: ${{ runner.os }}-android-build-v1-${{ hashFiles('**/build.gradle.kts', '**/libs.versions.toml') }}
+          key: ${{ runner.os }}-android-build-v1-${{ github.run_number }}-${{ hashFiles('**/build.gradle.kts', '**/libs.versions.toml') }}
           restore-keys: |
             ${{ runner.os }}-android-build-v1-
 
-      - name: Check Cache Status
+      - name: Delete Restored Cache
+        if: steps.cache.outputs.cache-hit == 'true'
         run: |
-          if [ "${{ steps.cache.outputs.cache-hit }}" == "true" ]; then
-            echo "✅ Cache HIT! Build will be faster"
-          else
-            echo "❌ Cache MISS! Building from scratch"
-          fi
-
-          echo "Gradle cache size:"
-          du -sh ~/.gradle/caches/ 2>/dev/null || echo "No gradle cache"
-          echo "Android SDK cache size:"
-          du -sh ~/.android/sdk/ 2>/dev/null || echo "No Android SDK cache"
-
-      - name: Delete Old Caches
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          echo "Deleting old caches..."
+          echo "Deleting restored cache..."
 
           rm -rf ~/.gradle/caches/modules-2/ 2>/dev/null || true
+          rm -rf ~/.gradle/caches/build-cache-1/ 2>/dev/null || true
           rm -rf ~/.gradle/caches/*/ 2>/dev/null || true
 
           rm -rf build/.gradle/ 2>/dev/null || true
@@ -67,7 +55,7 @@ jobs:
           rm -rf ~/.android/sdk/.temp/ 2>/dev/null || true
           rm -rf ~/.android/sdk/temp/ 2>/dev/null || true
 
-          echo "Old caches deleted"
+          echo "Restored cache deleted, will create fresh cache at end"
           echo "Available space:"
           df -h /home/runner/
 
