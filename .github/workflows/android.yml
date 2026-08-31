@@ -115,12 +115,30 @@ jobs:
 
           echo "$CAPTION" > caption.txt
 
-          curl --silent --show-error \
-            -F chat_id="$CHAT_ID" \
-            -F parse_mode=HTML \
-            -F "caption=<caption.txt" \
-            -F document=@Lucid-Gallery.apk \
-            "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument"
+          FILE_SIZE=$(stat -c%s "Lucid-Gallery.apk")
+          FILE_SIZE_MB=$((FILE_SIZE / 1024 / 1024))
+
+          echo "APK size: ${FILE_SIZE_MB}MB (${FILE_SIZE} bytes)"
+
+          if [ $FILE_SIZE -gt 49000000 ]; then
+            echo "APK too large for Telegram (50MB limit)"
+            echo "Sending notification without file..."
+
+            curl --silent --show-error \
+              -F chat_id="$CHAT_ID" \
+              -F parse_mode=HTML \
+              -F "caption=<caption.txt" \
+              "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage"
+          else
+            echo "Sending APK to Telegram..."
+
+            curl --silent --show-error \
+              -F chat_id="$CHAT_ID" \
+              -F parse_mode=HTML \
+              -F "caption=<caption.txt" \
+              -F document=@Lucid-Gallery.apk \
+              "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument"
+          fi
 
       - name: Upload APK as Artifact
         if: success()
