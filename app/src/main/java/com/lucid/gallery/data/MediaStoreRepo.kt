@@ -10,7 +10,6 @@ class MediaStoreRepo(private val context: Context) {
 
     suspend fun fetchAlbums(): List<Album> = withContext(Dispatchers.IO) {
         val albumsMap = mutableMapOf<Long, AlbumBuilder>()
-
         val projection = arrayOf(
             MediaStore.Files.FileColumns._ID,
             MediaStore.Files.FileColumns.BUCKET_ID,
@@ -18,12 +17,8 @@ class MediaStoreRepo(private val context: Context) {
             MediaStore.Files.FileColumns.DATA,
             MediaStore.Files.FileColumns.MEDIA_TYPE
         )
-
         val selection = "${MediaStore.Files.FileColumns.MEDIA_TYPE} = ? OR ${MediaStore.Files.FileColumns.MEDIA_TYPE} = ?"
-        val selectionArgs = arrayOf(
-            MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE.toString(),
-            MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO.toString()
-        )
+        val selectionArgs = arrayOf(MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE.toString(), MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO.toString())
         val sortOrder = "${MediaStore.Files.FileColumns.DATE_ADDED} DESC"
         val queryUri = MediaStore.Files.getContentUri("external")
 
@@ -38,26 +33,61 @@ class MediaStoreRepo(private val context: Context) {
                 val bucketId = cursor.getLong(bucketIdColumn)
                 val bucketName = cursor.getString(bucketNameColumn) ?: "Unknown"
                 val path = cursor.getString(pathColumn).orEmpty()
-                val isDefaultCamera = bucketName.equals("Camera", ignoreCase = true) ||
-                        path.replace('\\', '/').contains("/DCIM/Camera/", ignoreCase = true)
-
+                val isDefaultCamera = bucketName.equals("Camera", ignoreCase = true) || path.replace('\\', '/').contains("/DCIM/Camera/", ignoreCase = true)
                 val contentUri = ContentUris.withAppendedId(queryUri, id)
 
-                val albumBuilder = albumsMap.getOrPut(bucketId) {
-                    AlbumBuilder(bucketId, bucketName, contentUri, 0, isDefaultCamera)
-                }
+                val albumBuilder = albumsMap.getOrPut(bucketId) { AlbumBuilder(bucketId, bucketName, contentUri, 0, isDefaultCamera) }
                 albumBuilder.count++
             }
         }
+        return@withContext albumsMap.values.map { Album(it.id, it.name, it.coverUri, it.count, it.isDefaultCamera) }.sortedByDescending { it.mediaCount }
+    }
 
-        return@withContext albumsMap.values.map {
-            Album(it.id, it.name, it.coverUri, it.count, it.isDefaultCamera)
-        }.sortedByDescending { it.mediaCount }
+    suspend fun fetchAllMedia(): List<MediaItem> = withContext(Dispatchers.IO) {
+        val mediaList = mutableListOf<MediaItem>()
+        val projection = arrayOf(
+            MediaStore.Files.FileColumns._ID,
+            MediaStore.Files.FileColumns.BUCKET_ID,
+            MediaStore.Files.FileColumns.BUCKET_DISPLAY_NAME,
+            MediaStore.Files.FileColumns.DATE_ADDED,
+            MediaStore.Files.FileColumns.DATE_TAKEN,
+            MediaStore.Files.FileColumns.MEDIA_TYPE
+        )
+        val selection = "${MediaStore.Files.FileColumns.MEDIA_TYPE} = ? OR ${MediaStore.Files.FileColumns.MEDIA_TYPE} = ?"
+        val selectionArgs = arrayOf(MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE.toString(), MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO.toString())
+        val queryUri = MediaStore.Files.getContentUri("external")
+
+        context.contentResolver.query(queryUri, projection, selection, selectionArgs, null)?.use { cursor ->
+            val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
+            val bucketIdColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.BUCKET_ID)
+            val dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_ADDED)
+            val dateTakenColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_TAKEN)
+            val typeColumn = cursor.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE)
+
+            while (cursor.moveToNext()) {
+                val id = cursor.getLong(idColumn)
+                val added = cursor.getLong(dateAddedColumn) * 1000L
+                val taken = cursor.getLong(dateTakenColumn)
+                val mediaType = cursor.getInt(typeColumn)
+
+                mediaList.add(
+                    MediaItem(
+                        id = id,
+                        uri = ContentUris.withAppendedId(queryUri, id),
+                        bucketId = cursor.getLong(bucketIdColumn),
+                        timestamp = if (taken > 0L) taken else added,
+                        addedTimestamp = added,
+                        capturedTimestamp = if (taken > 0L) taken else added,
+                        isVideo = (mediaType == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO)
+                    )
+                )
+            }
+        }
+        return@withContext mediaList
     }
 
     suspend fun fetchMediaInAlbum(bucketId: Long): List<MediaItem> = withContext(Dispatchers.IO) {
         val mediaList = mutableListOf<MediaItem>()
-
         val projection = arrayOf(
             MediaStore.Files.FileColumns._ID,
             MediaStore.Files.FileColumns.DATE_ADDED,
@@ -84,15 +114,17 @@ class MediaStoreRepo(private val context: Context) {
                 val id = cursor.getLong(idColumn)
                 val mediaType = cursor.getInt(typeColumn)
                 val contentUri = ContentUris.withAppendedId(queryUri, id)
+                val added = cursor.getLong(dateAddedColumn) * 1000L
+                val taken = cursor.getLong(dateTakenColumn)
 
                 mediaList.add(
                     MediaItem(
                         id = id,
                         uri = contentUri,
                         bucketId = bucketId,
-                        timestamp = cursor.getLong(dateTakenColumn).takeIf { it > 0L } ?: (cursor.getLong(dateAddedColumn) * 1000L),
-                        addedTimestamp = cursor.getLong(dateAddedColumn) * 1000L,
-                        capturedTimestamp = cursor.getLong(dateTakenColumn).takeIf { it > 0L } ?: (cursor.getLong(dateAddedColumn) * 1000L),
+                        timestamp = if (taken > 0L) taken else added,
+                        addedTimestamp = added,
+                        capturedTimestamp = if (taken > 0L) taken else added,
                         isVideo = (mediaType == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO)
                     )
                 )

@@ -1,6 +1,12 @@
 package com.lucid.gallery.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,15 +19,24 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.FilterList
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Sort
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -34,6 +49,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -41,7 +57,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.lucid.gallery.data.MediaItem
 import com.lucid.gallery.data.MediaStoreRepo
-import com.lucid.gallery.ui.theme.TextSecondary
+import com.lucid.gallery.data.PreferencesManager
 import com.lucid.gallery.ui.theme.Typography
 
 @Composable
@@ -52,19 +68,47 @@ fun PhotosScreen(
 ) {
     val context = LocalContext.current
     val repo = remember { MediaStoreRepo(context) }
-    var mediaItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    val prefs = remember { PreferencesManager(context) }
+
+    var allMedia by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var cameraAlbumId by remember { mutableStateOf(-1L) }
+
+    var selectedFilters by remember { mutableStateOf(prefs.selectedFilters) }
+    var sortMode by remember { mutableStateOf(prefs.sortMode) }
+    var showMenu by remember { mutableStateOf(false) }
+    var isFilterExpanded by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
         val albums = repo.fetchAlbums()
-        val cameraAlbum = albums.firstOrNull { it.isDefaultCamera } ?: albums.firstOrNull()
-        if (cameraAlbum != null) {
-            mediaItems = repo.fetchMediaInAlbum(cameraAlbum.id)
+        cameraAlbumId = albums.firstOrNull { it.isDefaultCamera }?.id ?: -1L
+        allMedia = repo.fetchAllMedia()
+    }
+
+    val isAllSelected = selectedFilters.isEmpty() || selectedFilters.contains("All")
+
+    val displayedItems = remember(allMedia, selectedFilters, sortMode, cameraAlbumId) {
+        val filtered = if (isAllSelected) {
+            allMedia
+        } else {
+            allMedia.filter { item ->
+                var matches = false
+                if (selectedFilters.contains("Camera") && item.bucketId == cameraAlbumId) matches = true
+                if (selectedFilters.contains("Photo") && !item.isVideo) matches = true
+                if (selectedFilters.contains("Video") && item.isVideo) matches = true
+                if (selectedFilters.contains("Screenshots") && item.uri.path?.contains("Screenshot", ignoreCase = true) == true) matches = true
+                matches
+            }
+        }
+        if (sortMode == "added") {
+            filtered.sortedByDescending { it.addedTimestamp }
+        } else {
+            filtered.sortedByDescending { it.capturedTimestamp }
         }
     }
 
-    LaunchedEffect(syncedMediaId, mediaItems) {
-        if (syncedMediaId != null && mediaItems.isNotEmpty()) {
-            val index = mediaItems.indexOfFirst { it.id == syncedMediaId }
+    LaunchedEffect(syncedMediaId, displayedItems) {
+        if (syncedMediaId != null && displayedItems.isNotEmpty()) {
+            val index = displayedItems.indexOfFirst { it.id == syncedMediaId }
             if (index != -1 && !gridState.layoutInfo.visibleItemsInfo.any { it.index == index }) {
                 gridState.scrollToItem(index)
             }
@@ -74,62 +118,165 @@ fun PhotosScreen(
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Column(Modifier.fillMaxSize()) {
             Spacer(Modifier.height(48.dp))
-            Column(Modifier.padding(horizontal = 16.dp)) {
-                Text("ALL MOMENTS", color = MaterialTheme.colorScheme.primary, style = Typography.labelMedium)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Photos", color = MaterialTheme.colorScheme.onBackground, style = Typography.displaySmall)
-                    Row {
-                        IconButton(onClick = {}) {
-                            Icon(Icons.Outlined.FilterList, contentDescription = "Filter", tint = MaterialTheme.colorScheme.onBackground)
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Photos", color = MaterialTheme.colorScheme.onBackground, style = Typography.displaySmall)
+                Row {
+                    Box {
+                        IconButton(onClick = { showMenu = true }) {
+                            Icon(Icons.Outlined.Sort, contentDescription = "Sort and Filter", tint = MaterialTheme.colorScheme.onBackground)
                         }
-                        IconButton(onClick = {}) {
-                            Icon(Icons.Outlined.MoreVert, contentDescription = "More options", tint = MaterialTheme.colorScheme.onBackground)
+
+                        MaterialTheme(
+                            shapes = MaterialTheme.shapes.copy(extraSmall = RoundedCornerShape(24.dp))
+                        ) {
+                            DropdownMenu(
+                                expanded = showMenu,
+                                onDismissRequest = { showMenu = false },
+                                modifier = Modifier
+                                    .width(230.dp)
+                                    .clip(RoundedCornerShape(24.dp))
+                                    .background(MaterialTheme.colorScheme.surface)
+                                    .border(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f), RoundedCornerShape(24.dp))
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Sort by recently added", color = MaterialTheme.colorScheme.onSurface) },
+                                    trailingIcon = {
+                                        if (sortMode == "added") Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.onSurface)
+                                    },
+                                    onClick = {
+                                        sortMode = "added"
+                                        prefs.sortMode = "added"
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Sort by date captured", color = MaterialTheme.colorScheme.onSurface) },
+                                    trailingIcon = {
+                                        if (sortMode == "captured") Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.onSurface)
+                                    },
+                                    onClick = {
+                                        sortMode = "captured"
+                                        prefs.sortMode = "captured"
+                                    }
+                                )
+
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(vertical = 4.dp),
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
+                                )
+
+                                DropdownMenuItem(
+                                    text = { Text("Filter", color = MaterialTheme.colorScheme.onSurface) },
+                                    trailingIcon = {
+                                        Icon(
+                                            if (isFilterExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurface
+                                        )
+                                    },
+                                    onClick = { isFilterExpanded = !isFilterExpanded }
+                                )
+
+                                AnimatedVisibility(
+                                    visible = isFilterExpanded,
+                                    enter = expandVertically() + fadeIn(),
+                                    exit = shrinkVertically() + fadeOut()
+                                ) {
+                                    Column {
+                                        DropdownMenuItem(
+                                            text = { Text("All", color = MaterialTheme.colorScheme.onSurface) },
+                                            trailingIcon = {
+                                                if (isAllSelected) Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.onSurface)
+                                            },
+                                            onClick = {
+                                                selectedFilters = setOf("All")
+                                                prefs.selectedFilters = setOf("All")
+                                            }
+                                        )
+
+                                        val filterOptions = listOf("Camera", "Photo", "Video", "Screenshots")
+                                        filterOptions.forEach { filter ->
+                                            val isChecked = !isAllSelected && selectedFilters.contains(filter)
+                                            DropdownMenuItem(
+                                                text = { Text(filter, color = MaterialTheme.colorScheme.onSurface) },
+                                                trailingIcon = {
+                                                    if (isChecked) Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.onSurface)
+                                                },
+                                                onClick = {
+                                                    val updated = if (isAllSelected) {
+                                                        mutableSetOf(filter)
+                                                    } else {
+                                                        val set = selectedFilters.toMutableSet()
+                                                        if (set.contains(filter)) {
+                                                            set.remove(filter)
+                                                        } else {
+                                                            set.add(filter)
+                                                        }
+                                                        if (set.isEmpty()) setOf("All") else set
+                                                    }
+                                                    selectedFilters = updated
+                                                    prefs.selectedFilters = updated
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
-                }
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("1 folder(s) selected", color = TextSecondary, style = Typography.labelMedium)
-                    Text("${mediaItems.size} shown", color = TextSecondary, style = Typography.labelMedium)
+                    IconButton(onClick = {}) {
+                        Icon(Icons.Outlined.MoreVert, contentDescription = "More options", tint = MaterialTheme.colorScheme.onBackground)
+                    }
                 }
             }
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(16.dp))
 
-            LazyVerticalGrid(
-                state = gridState,
-                columns = GridCells.Fixed(3),
-                contentPadding = PaddingValues(bottom = 120.dp, start = 2.dp, end = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                items(mediaItems, key = { it.id }) { item ->
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(1f)
-                            .clickable { onMediaClick(item) }
-                    ) {
-                        AsyncImage(
-                            model = item.uri,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                        if (item.isVideo) {
-                            Icon(
-                                imageVector = Icons.Outlined.PlayArrow,
-                                contentDescription = "Video",
-                                tint = Color.White,
-                                modifier = Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .padding(6.dp)
-                                    .background(Color.Black.copy(alpha = 0.65f), RoundedCornerShape(50))
-                                    .padding(4.dp)
+            if (displayedItems.isEmpty() && allMedia.isNotEmpty()) {
+                Box(Modifier.fillMaxSize().padding(bottom = 120.dp), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Outlined.Image, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f))
+                        Spacer(Modifier.height(8.dp))
+                        Text("Nothing here yet", color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f), style = Typography.bodyLarge)
+                    }
+                }
+            } else {
+                LazyVerticalGrid(
+                    state = gridState,
+                    columns = GridCells.Fixed(3),
+                    contentPadding = PaddingValues(bottom = 120.dp, start = 2.dp, end = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(displayedItems, key = { it.id }) { item ->
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(1f)
+                                .clickable { onMediaClick(item) }
+                        ) {
+                            AsyncImage(
+                                model = item.uri,
+                                contentDescription = null,
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
                             )
+                            if (item.isVideo) {
+                                Icon(
+                                    imageVector = Icons.Outlined.PlayArrow,
+                                    contentDescription = "Video",
+                                    tint = Color.White,
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(6.dp)
+                                        .background(Color.Black.copy(alpha = 0.65f), RoundedCornerShape(50))
+                                        .padding(4.dp)
+                                )
+                            }
                         }
                     }
                 }
