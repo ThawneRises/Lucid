@@ -14,7 +14,7 @@ jobs:
   build:
     name: Build & Deploy Lucid
     runs-on: ubuntu-latest
-
+    if: ${{ !contains(github.event.head_commit.message, 'Merge pull request') }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -112,7 +112,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Lucid-Gallery-Release-apk-${{ github.run_number }}
+          name: Lucid-Gallery-${{ github.ref_name }}-apk-${{ github.run_number }}
           path: Lucid-Gallery.apk
           retention-days: 14
 
@@ -120,10 +120,11 @@ jobs:
         if: success()
         run: |
           DATETIME=$(date +'%Y%m%d_%H%M%S')
-          zip -9 "Lucid-Gallery-${DATETIME}.zip" Lucid-Gallery.apk
-          echo "Created ZIP: Lucid-Gallery-${DATETIME}.zip"
+          BRANCH_NAME="${{ github.ref_name }}"
+          zip -9 "Lucid-Gallery-${BRANCH_NAME}-${DATETIME}.zip" Lucid-Gallery.apk
+          echo "Created ZIP: Lucid-Gallery-${BRANCH_NAME}-${DATETIME}.zip"
           ls -la Lucid-Gallery-*.zip
-          echo "ZIP_FILE=Lucid-Gallery-${DATETIME}.zip" >> $GITHUB_ENV
+          echo "ZIP_FILE=Lucid-Gallery-${BRANCH_NAME}-${DATETIME}.zip" >> $GITHUB_ENV
 
       - name: Send Failed Build Log to Telegram
         if: failure()
@@ -131,10 +132,11 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHAT_ID: ${{ secrets.TEST_BUILDS }}
         run: |
+          BRANCH_NAME="${{ github.ref_name }}"
           curl --silent --show-error \
             -F chat_id="$CHAT_ID" \
             -F parse_mode=HTML \
-            -F "caption=<b>❌ Lucid Gallery release build failed</b>" \
+            -F "caption=<b>❌ Lucid Gallery release build failed</b>%0A%0A<b>Branch:</b> ${BRANCH_NAME}" \
             -F document=@Lucid-Gallery-Build.log \
             "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument"
 
@@ -148,10 +150,13 @@ jobs:
           COMMIT_TIME="$(git log -1 --pretty=%ci)"
           COMMIT_AUTHOR="$(git log -1 --pretty=%an)"
           COMMIT_HASH="$(git log -1 --pretty=%h)"
+          BRANCH_NAME="${{ github.ref_name }}"
 
           SAFE_COMMIT=$(echo "$FULL_COMMIT" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')
 
           CAPTION="<b>✅ Lucid Gallery Built Successfully</b>
+
+          <b>Branch:</b> ${BRANCH_NAME}
 
           <b>Commit:</b>
           $SAFE_COMMIT
@@ -176,7 +181,7 @@ jobs:
             curl --silent --show-error \
               -F chat_id="$CHAT_ID" \
               -F parse_mode=HTML \
-              -F "text=<b>✅ Lucid Gallery Built Successfully</b>%0A%0A<b>Commit:</b>%0A$SAFE_COMMIT%0A%0A<b>Hash:</b> $COMMIT_HASH%0A<b>Author:</b> $COMMIT_AUTHOR%0A<b>Time:</b> $COMMIT_TIME%0A%0A⚠️ APK too large for Telegram" \
+              -F "text=<b>✅ Lucid Gallery Built Successfully</b>%0A%0A<b>Branch:</b> ${BRANCH_NAME}%0A%0A<b>Commit:</b>%0A$SAFE_COMMIT%0A%0A<b>Hash:</b> $COMMIT_HASH%0A<b>Author:</b> $COMMIT_AUTHOR%0A<b>Time:</b> $COMMIT_TIME%0A%0A⚠️ APK too large for Telegram" \
               "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage"
           else
             echo "Sending ZIP to Telegram..."
