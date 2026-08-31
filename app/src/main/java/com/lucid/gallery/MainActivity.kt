@@ -11,10 +11,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -67,11 +63,7 @@ class MainActivity : ComponentActivity() {
                         SharedTransitionLayout {
                             NavHost(
                                 navController = navController,
-                                startDestination = "photos",
-                                enterTransition = { fadeIn(tween(350, easing = FastOutSlowInEasing)) },
-                                exitTransition = { fadeOut(tween(350, easing = FastOutSlowInEasing)) },
-                                popEnterTransition = { fadeIn(tween(350, easing = FastOutSlowInEasing)) },
-                                popExitTransition = { fadeOut(tween(350, easing = FastOutSlowInEasing)) }
+                                startDestination = "photos"
                             ) {
                                 composable("photos") {
                                     PhotosScreen(

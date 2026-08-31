@@ -3,8 +3,6 @@ package com.lucid.gallery.ui.screens
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -25,6 +23,7 @@ import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
 import com.lucid.gallery.data.MediaItem
 import com.lucid.gallery.data.MediaStoreRepo
+import com.lucid.gallery.ui.theme.AnimationConstants
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalSharedTransitionApi::class)
 @Composable
@@ -64,6 +63,7 @@ fun ViewerScreen(
                     key = { page -> mediaItems.getOrNull(page)?.id ?: page }
                 ) { page ->
                     val mediaItem = mediaItems[page]
+                    val isActivePage = page == pagerState.currentPage
 
                     AsyncImage(
                         model = mediaItem.uri,
@@ -71,10 +71,14 @@ fun ViewerScreen(
                         contentScale = ContentScale.Fit,
                         modifier = Modifier
                             .fillMaxSize()
-                            .sharedElement(
-                                sharedContentState = rememberSharedContentState(key = "media-${mediaItem.id}"),
-                                animatedVisibilityScope = animatedVisibilityScope,
-                                boundsTransform = { _, _ -> tween(350, easing = FastOutSlowInEasing) }
+                            .then(
+                                if (isActivePage) {
+                                    Modifier.sharedElement(
+                                        sharedContentState = rememberSharedContentState(key = "media-${mediaItem.id}"),
+                                        animatedVisibilityScope = animatedVisibilityScope,
+                                        boundsTransform = { _, _ -> AnimationConstants.expressiveSpring() }
+                                    )
+                                } else Modifier
                             )
                     )
                 }

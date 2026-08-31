@@ -64,7 +64,26 @@ jobs:
         run: |
           ./gradlew --no-daemon --parallel --stacktrace :app:assembleRelease 2>&1 | tee Lucid-Gallery-Build.log
 
-          mv app/build/outputs/apk/release/app-release.apk Lucid-Gallery.apk
+          APK_PATH=$(find app/build/outputs/apk/release/ -name "*.apk" -type f | head -n 1)
+
+          if [ -z "$APK_PATH" ]; then
+            echo "No APK found in app/build/outputs/apk/release/"
+            echo "Listing all APK files:"
+            find app/build/outputs/ -name "*.apk" -type f
+            exit 1
+          fi
+
+          echo "Found APK at: $APK_PATH"
+          mv "$APK_PATH" Lucid-Gallery.apk
+          ls -la Lucid-Gallery.apk
+
+      - name: Debug - List APK files (on failure)
+        if: failure()
+        run: |
+          echo "Listing all APK files:"
+          find app/build/outputs/ -name "*.apk" -type f
+          echo "Listing release directory:"
+          ls -la app/build/outputs/apk/release/ 2>/dev/null || echo "Release directory not found"
 
       - name: Send Failed Build Log to Telegram
         if: failure()

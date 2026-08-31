@@ -3,8 +3,6 @@ package com.lucid.gallery.ui.screens
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -31,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.lucid.gallery.data.MediaItem
 import com.lucid.gallery.data.MediaStoreRepo
+import com.lucid.gallery.ui.theme.AnimationConstants
 
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -67,7 +66,7 @@ fun PhotosScreen(
             LazyVerticalGrid(
                 state = gridState,
                 columns = GridCells.Fixed(3),
-                contentPadding = PaddingValues(top = 48.dp, bottom = 120.dp),
+                contentPadding = PaddingValues(top = 48.dp, bottom = 120.dp, start = 2.dp, end = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
                 modifier = Modifier.fillMaxSize()
@@ -83,7 +82,7 @@ fun PhotosScreen(
                             .sharedElement(
                                 sharedContentState = rememberSharedContentState(key = "media-${item.id}"),
                                 animatedVisibilityScope = animatedVisibilityScope,
-                                boundsTransform = { _, _ -> tween(350, easing = FastOutSlowInEasing) }
+                                boundsTransform = { _, _ -> AnimationConstants.expressiveSpring() }
                             )
                             .clickable { onMediaClick(item) }
                     )
