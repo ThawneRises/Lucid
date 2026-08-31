@@ -94,7 +94,7 @@ jobs:
           curl --silent --show-error \
             -F chat_id="$CHAT_ID" \
             -F parse_mode=HTML \
-            -F "caption=<b>❌ Lucid Gallery release build failed</b>" \
+            -F "caption=❌ Lucid Gallery release build failed" \
             -F document=@Lucid-Gallery-Build.log \
             "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument"
 
@@ -108,18 +108,16 @@ jobs:
 
           SAFE_COMMIT=$(echo "$FULL_COMMIT" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')
 
-          CAPTION="<b>✅ Lucid Gallery Built Successfully</b>
+          CAPTION="✅ Lucid Gallery Built Successfully
 
-          <b>Commit:</b>
+          Commit:
           $SAFE_COMMIT"
-
-          echo "$CAPTION" > caption.txt
 
           curl --silent --show-error \
             -F chat_id="$CHAT_ID" \
             -F parse_mode=HTML \
-            -F "caption=<caption.txt" \
-            -F document=@Lucid-Gallery.apk \
+            -F "caption=$CAPTION" \
+            -F "document=@Lucid-Gallery.apk" \
             "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument"
 
       - name: Upload APK as Artifact
