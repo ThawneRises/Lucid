@@ -1,8 +1,5 @@
 package com.lucid.gallery.ui.screens
 
-import androidx.compose.animation.AnimatedVisibilityScope
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -23,13 +20,10 @@ import androidx.compose.ui.platform.LocalContext
 import coil.compose.AsyncImage
 import com.lucid.gallery.data.MediaItem
 import com.lucid.gallery.data.MediaStoreRepo
-import com.lucid.gallery.ui.theme.AnimationConstants
 
-@OptIn(ExperimentalFoundationApi::class, ExperimentalSharedTransitionApi::class)
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ViewerScreen(
-    sharedTransitionScope: SharedTransitionScope,
-    animatedVisibilityScope: AnimatedVisibilityScope,
     bucketId: Long,
     initialMediaId: Long,
     onMediaChanged: (Long) -> Unit,
@@ -55,33 +49,20 @@ fun ViewerScreen(
         }
 
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-            with(sharedTransitionScope) {
-                HorizontalPager(
-                    state = pagerState,
-                    modifier = Modifier.fillMaxSize(),
-                    beyondViewportPageCount = 1,
-                    key = { page -> mediaItems.getOrNull(page)?.id ?: page }
-                ) { page ->
-                    val mediaItem = mediaItems[page]
-                    val isActivePage = page == pagerState.currentPage
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+                beyondViewportPageCount = 1,
+                key = { page -> mediaItems.getOrNull(page)?.id ?: page }
+            ) { page ->
+                val mediaItem = mediaItems[page]
 
-                    AsyncImage(
-                        model = mediaItem.uri,
-                        contentDescription = null,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .then(
-                                if (isActivePage) {
-                                    Modifier.sharedElement(
-                                        sharedContentState = rememberSharedContentState(key = "media-${mediaItem.id}"),
-                                        animatedVisibilityScope = animatedVisibilityScope,
-                                        boundsTransform = { _, _ -> AnimationConstants.expressiveSpring() }
-                                    )
-                                } else Modifier
-                            )
-                    )
-                }
+                AsyncImage(
+                    model = mediaItem.uri,
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize()
+                )
             }
         }
     } else {

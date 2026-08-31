@@ -29,16 +29,46 @@ jobs:
 
       - name: Cache Android SDK & Build Files
         uses: actions/cache@v4
+        id: cache
         with:
           path: |
             ~/.android/sdk
             ~/.gradle/caches/build-cache-1
             ~/.gradle/caches/modules-2
             build/.gradle
-          key: ${{ runner.os }}-android-build-${{ hashFiles('**/build.gradle.kts', '**/libs.versions.toml') }}
+          key: ${{ runner.os }}-android-build-v1-${{ hashFiles('**/build.gradle.kts', '**/libs.versions.toml') }}
           restore-keys: |
-            ${{ runner.os }}-android-build-
-            ${{ runner.os }}-android-
+            ${{ runner.os }}-android-build-v1-
+
+      - name: Check Cache Status
+        run: |
+          if [ "${{ steps.cache.outputs.cache-hit }}" == "true" ]; then
+            echo "✅ Cache HIT! Build will be faster"
+          else
+            echo "❌ Cache MISS! Building from scratch"
+          fi
+
+          echo "Gradle cache size:"
+          du -sh ~/.gradle/caches/ 2>/dev/null || echo "No gradle cache"
+          echo "Android SDK cache size:"
+          du -sh ~/.android/sdk/ 2>/dev/null || echo "No Android SDK cache"
+
+      - name: Delete Old Caches
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          echo "Deleting old caches..."
+
+          rm -rf ~/.gradle/caches/modules-2/ 2>/dev/null || true
+          rm -rf ~/.gradle/caches/*/ 2>/dev/null || true
+
+          rm -rf build/.gradle/ 2>/dev/null || true
+
+          rm -rf ~/.android/sdk/.temp/ 2>/dev/null || true
+          rm -rf ~/.android/sdk/temp/ 2>/dev/null || true
+
+          echo "Old caches deleted"
+          echo "Available space:"
+          df -h /home/runner/
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -77,13 +107,22 @@ jobs:
           mv "$APK_PATH" Lucid-Gallery.apk
           ls -la Lucid-Gallery.apk
 
-      - name: Debug - List APK files (on failure)
-        if: failure()
+      - name: Upload APK as Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lucid-Gallery-Release-apk-${{ github.run_number }}
+          path: Lucid-Gallery.apk
+          retention-days: 14
+
+      - name: Create ZIP with DateTime
+        if: success()
         run: |
-          echo "Listing all APK files:"
-          find app/build/outputs/ -name "*.apk" -type f
-          echo "Listing release directory:"
-          ls -la app/build/outputs/apk/release/ 2>/dev/null || echo "Release directory not found"
+          DATETIME=$(date +'%Y%m%d_%H%M%S')
+          zip -9 "Lucid-Gallery-${DATETIME}.zip" Lucid-Gallery.apk
+          echo "Created ZIP: Lucid-Gallery-${DATETIME}.zip"
+          ls -la Lucid-Gallery-*.zip
+          echo "ZIP_FILE=Lucid-Gallery-${DATETIME}.zip" >> $GITHUB_ENV
 
       - name: Send Failed Build Log to Telegram
         if: failure()
@@ -98,7 +137,7 @@ jobs:
             -F document=@Lucid-Gallery-Build.log \
             "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument"
 
-      - name: Parse Commit & Send APK to Telegram
+      - name: Parse Commit & Send ZIP to Telegram
         if: success()
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
@@ -115,35 +154,29 @@ jobs:
 
           echo "$CAPTION" > caption.txt
 
-          FILE_SIZE=$(stat -c%s "Lucid-Gallery.apk")
-          FILE_SIZE_MB=$((FILE_SIZE / 1024 / 1024))
+          ZIP_FILE=$(ls Lucid-Gallery-*.zip | head -n 1)
+          ZIP_SIZE=$(stat -c%s "$ZIP_FILE")
+          ZIP_SIZE_MB=$((ZIP_SIZE / 1024 / 1024))
 
-          echo "APK size: ${FILE_SIZE_MB}MB (${FILE_SIZE} bytes)"
+          echo "ZIP file: $ZIP_FILE"
+          echo "ZIP size: ${ZIP_SIZE_MB}MB (${ZIP_SIZE} bytes)"
 
-          if [ $FILE_SIZE -gt 49000000 ]; then
-            echo "APK too large for Telegram (50MB limit)"
+          if [ $ZIP_SIZE -gt 49000000 ]; then
+            echo "ZIP too large for Telegram (50MB limit)"
             echo "Sending notification without file..."
 
             curl --silent --show-error \
               -F chat_id="$CHAT_ID" \
               -F parse_mode=HTML \
-              -F "caption=<caption.txt" \
+              -F "text=<b>✅ Lucid Gallery Built Successfully</b>%0A%0A<b>Commit:</b>%0A$SAFE_COMMIT%0A%0A⚠️ APK too large for Telegram" \
               "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage"
           else
-            echo "Sending APK to Telegram..."
+            echo "Sending ZIP to Telegram..."
 
             curl --silent --show-error \
               -F chat_id="$CHAT_ID" \
               -F parse_mode=HTML \
               -F "caption=<caption.txt" \
-              -F document=@Lucid-Gallery.apk \
+              -F "document=@$ZIP_FILE" \
               "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument"
           fi
-
-      - name: Upload APK as Artifact
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Lucid-Gallery-Release-apk
-          path: Lucid-Gallery.apk
-          retention-days: 14

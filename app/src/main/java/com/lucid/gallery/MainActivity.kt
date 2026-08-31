@@ -9,8 +9,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -40,7 +44,6 @@ import com.lucid.gallery.ui.screens.ViewerScreen
 import com.lucid.gallery.ui.theme.LucidPhotosTheme
 
 class MainActivity : ComponentActivity() {
-    @OptIn(ExperimentalSharedTransitionApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -60,41 +63,59 @@ class MainActivity : ComponentActivity() {
                     var syncedMediaId by remember { mutableStateOf<Long?>(null) }
 
                     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-                        SharedTransitionLayout {
-                            NavHost(
-                                navController = navController,
-                                startDestination = "photos"
-                            ) {
-                                composable("photos") {
-                                    PhotosScreen(
-                                        sharedTransitionScope = this@SharedTransitionLayout,
-                                        animatedVisibilityScope = this@composable,
-                                        syncedMediaId = syncedMediaId,
-                                        onMediaClick = { media ->
-                                            syncedMediaId = media.id
-                                            navController.navigate("viewer/${media.bucketId}/${media.id}")
-                                        }
-                                    )
-                                }
-                                composable(
-                                    route = "viewer/{bucketId}/{mediaId}",
-                                    arguments = listOf(
-                                        navArgument("bucketId") { type = NavType.LongType },
-                                        navArgument("mediaId") { type = NavType.LongType }
-                                    )
-                                ) { backStackEntry ->
-                                    val bucketId = backStackEntry.arguments?.getLong("bucketId") ?: 0L
-                                    val mediaId = backStackEntry.arguments?.getLong("mediaId") ?: 0L
+                        NavHost(
+                            navController = navController,
+                            startDestination = "photos",
+                            enterTransition = {
+                                slideInHorizontally(
+                                    initialOffsetX = { fullWidth -> fullWidth },
+                                    animationSpec = tween(300, easing = FastOutSlowInEasing)
+                                ) + fadeIn(tween(300))
+                            },
+                            exitTransition = {
+                                slideOutHorizontally(
+                                    targetOffsetX = { fullWidth -> -fullWidth / 3 },
+                                    animationSpec = tween(300, easing = FastOutSlowInEasing)
+                                ) + fadeOut(tween(300))
+                            },
+                            popEnterTransition = {
+                                slideInHorizontally(
+                                    initialOffsetX = { fullWidth -> -fullWidth / 3 },
+                                    animationSpec = tween(300, easing = FastOutSlowInEasing)
+                                ) + fadeIn(tween(300))
+                            },
+                            popExitTransition = {
+                                slideOutHorizontally(
+                                    targetOffsetX = { fullWidth -> fullWidth },
+                                    animationSpec = tween(300, easing = FastOutSlowInEasing)
+                                ) + fadeOut(tween(300))
+                            }
+                        ) {
+                            composable("photos") {
+                                PhotosScreen(
+                                    syncedMediaId = syncedMediaId,
+                                    onMediaClick = { media ->
+                                        syncedMediaId = media.id
+                                        navController.navigate("viewer/${media.bucketId}/${media.id}")
+                                    }
+                                )
+                            }
+                            composable(
+                                route = "viewer/{bucketId}/{mediaId}",
+                                arguments = listOf(
+                                    navArgument("bucketId") { type = NavType.LongType },
+                                    navArgument("mediaId") { type = NavType.LongType }
+                                )
+                            ) { backStackEntry ->
+                                val bucketId = backStackEntry.arguments?.getLong("bucketId") ?: 0L
+                                val mediaId = backStackEntry.arguments?.getLong("mediaId") ?: 0L
 
-                                    ViewerScreen(
-                                        sharedTransitionScope = this@SharedTransitionLayout,
-                                        animatedVisibilityScope = this@composable,
-                                        bucketId = bucketId,
-                                        initialMediaId = mediaId,
-                                        onMediaChanged = { newMediaId -> syncedMediaId = newMediaId },
-                                        onBack = { navController.popBackStack() }
-                                    )
-                                }
+                                ViewerScreen(
+                                    bucketId = bucketId,
+                                    initialMediaId = mediaId,
+                                    onMediaChanged = { newMediaId -> syncedMediaId = newMediaId },
+                                    onBack = { navController.popBackStack() }
+                                )
                             }
                         }
                     }

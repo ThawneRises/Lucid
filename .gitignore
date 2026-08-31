@@ -13,3 +13,4 @@
 *.keystore
 keystore.properties
 .vscode/*.code-workspace
+ANIMATIONS.md

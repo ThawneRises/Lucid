@@ -1,8 +1,5 @@
 package com.lucid.gallery.ui.screens
 
-import androidx.compose.animation.AnimatedVisibilityScope
-import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -29,13 +26,9 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.lucid.gallery.data.MediaItem
 import com.lucid.gallery.data.MediaStoreRepo
-import com.lucid.gallery.ui.theme.AnimationConstants
 
-@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun PhotosScreen(
-    sharedTransitionScope: SharedTransitionScope,
-    animatedVisibilityScope: AnimatedVisibilityScope,
     syncedMediaId: Long?,
     onMediaClick: (MediaItem) -> Unit
 ) {
@@ -62,31 +55,24 @@ fun PhotosScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
-        with(sharedTransitionScope) {
-            LazyVerticalGrid(
-                state = gridState,
-                columns = GridCells.Fixed(3),
-                contentPadding = PaddingValues(top = 48.dp, bottom = 120.dp, start = 2.dp, end = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                items(mediaItems, key = { it.id }) { item ->
-                    AsyncImage(
-                        model = item.uri,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .aspectRatio(1f)
-                            .sharedElement(
-                                sharedContentState = rememberSharedContentState(key = "media-${item.id}"),
-                                animatedVisibilityScope = animatedVisibilityScope,
-                                boundsTransform = { _, _ -> AnimationConstants.expressiveSpring() }
-                            )
-                            .clickable { onMediaClick(item) }
-                    )
-                }
+        LazyVerticalGrid(
+            state = gridState,
+            columns = GridCells.Fixed(3),
+            contentPadding = PaddingValues(top = 48.dp, bottom = 120.dp, start = 2.dp, end = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            items(mediaItems, key = { it.id }) { item ->
+                AsyncImage(
+                    model = item.uri,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(1f)
+                        .clickable { onMediaClick(item) }
+                )
             }
         }
     }
