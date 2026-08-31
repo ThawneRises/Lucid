@@ -1,6 +1,17 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+}
+
+// 1. Load the keystore.properties file
+val signingPropertiesFile = rootProject.file("keystore.properties")
+val signingProperties = Properties()
+val hasReleaseSigning = signingPropertiesFile.exists()
+
+if (hasReleaseSigning) {
+    signingPropertiesFile.inputStream().use(signingProperties::load)
 }
 
 android {
@@ -23,13 +34,33 @@ android {
         }
     }
 
+    // 2. Create the release signing configuration
+    signingConfigs {
+        create("release") {
+            if (hasReleaseSigning) {
+                storeFile = rootProject.file(signingProperties.getProperty("storeFile"))
+                storePassword = signingProperties.getProperty("storePassword")
+                keyAlias = signingProperties.getProperty("keyAlias")
+                keyPassword = signingProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             optimization {
                 enable = false
             }
+            // 3. Apply the signing config to the release build
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
+        debug {
+            // Debug automatically uses the default Android debug.keystore
         }
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
