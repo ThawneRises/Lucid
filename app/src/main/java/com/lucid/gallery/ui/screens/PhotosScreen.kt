@@ -27,13 +27,13 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PlayArrow
-import androidx.compose.material.icons.outlined.Sort
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -72,33 +72,45 @@ fun PhotosScreen(
 
     var allMedia by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var cameraAlbumId by remember { mutableStateOf(-1L) }
+    var albumFilters by remember { mutableStateOf<List<com.lucid.gallery.data.Album>>(emptyList()) }
 
-    var selectedFilters by remember { mutableStateOf(prefs.selectedFilters.ifEmpty { setOf("Camera") }) }
+    var selectedFilters by remember {
+        mutableStateOf(
+            prefs.selectedFilters
+                .takeIf { it.isNotEmpty() }
+                ?: setOf("Camera")
+        )
+    }
     var sortMode by remember { mutableStateOf(prefs.sortMode) }
     var showMenu by remember { mutableStateOf(false) }
-    var isFilterExpanded by remember { mutableStateOf(true) }
+    var isFilterExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         val albums = repo.fetchAlbums()
+        albumFilters = albums
         cameraAlbumId = albums.firstOrNull { it.isDefaultCamera }?.id ?: -1L
         allMedia = repo.fetchAllMedia()
+
+        if (prefs.selectedFilters.isEmpty()) {
+            selectedFilters = setOf("Camera")
+            prefs.selectedFilters = setOf("Camera")
+        }
     }
 
-    val isAllSelected = selectedFilters.contains("All")
+    val filterOptions = remember(albumFilters) {
+        listOf("Camera") + albumFilters.filter { !it.isDefaultCamera }.map { it.name }
+    }
 
-    val displayedItems = remember(allMedia, selectedFilters, sortMode, cameraAlbumId) {
-        val filtered = if (isAllSelected) {
-            allMedia
-        } else {
-            allMedia.filter { item ->
-                var matches = false
-                if (selectedFilters.contains("Camera") && item.bucketId == cameraAlbumId) matches = true
-                if (selectedFilters.contains("Photo") && !item.isVideo) matches = true
-                if (selectedFilters.contains("Video") && item.isVideo) matches = true
-                if (selectedFilters.contains("Screenshots") && item.uri.path?.contains("Screenshot", ignoreCase = true) == true) matches = true
-                matches
+    val displayedItems = remember(allMedia, selectedFilters, sortMode, cameraAlbumId, albumFilters) {
+        val selectedBucketIds = selectedFilters.mapNotNull { filter ->
+            if (filter == "Camera") {
+                cameraAlbumId.takeIf { it != -1L }
+            } else {
+                albumFilters.firstOrNull { it.name == filter }?.id
             }
-        }
+        }.toSet()
+
+        val filtered = allMedia.filter { item -> selectedBucketIds.contains(item.bucketId) }
         if (sortMode == "added") {
             filtered.sortedByDescending { it.addedTimestamp }
         } else {
@@ -127,7 +139,7 @@ fun PhotosScreen(
                 Row {
                     Box {
                         IconButton(onClick = { showMenu = true }) {
-                            Icon(Icons.Outlined.Sort, contentDescription = "Sort and Filter", tint = MaterialTheme.colorScheme.onBackground)
+                            Icon(Icons.AutoMirrored.Outlined.Sort, contentDescription = "Sort and Filter", tint = MaterialTheme.colorScheme.onBackground)
                         }
 
                         MaterialTheme(shapes = MaterialTheme.shapes.copy(extraSmall = RoundedCornerShape(24.dp))) {
@@ -163,22 +175,19 @@ fun PhotosScreen(
                                     exit = shrinkVertically() + fadeOut()
                                 ) {
                                     Column {
-                                        DropdownMenuItem(
-                                            text = { Text("All", color = MaterialTheme.colorScheme.onSurface) },
-                                            trailingIcon = { if (isAllSelected) Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.onSurface) },
-                                            onClick = { selectedFilters = setOf("All"); prefs.selectedFilters = setOf("All") }
-                                        )
-                                        listOf("Camera", "Photo", "Video", "Screenshots").forEach { filter ->
-                                            val isChecked = !isAllSelected && selectedFilters.contains(filter)
+                                        filterOptions.forEach { filter ->
+                                            val isChecked = selectedFilters.contains(filter)
                                             DropdownMenuItem(
                                                 text = { Text(filter, color = MaterialTheme.colorScheme.onSurface) },
                                                 trailingIcon = { if (isChecked) Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.onSurface) },
                                                 onClick = {
-                                                    val updated = if (isAllSelected) mutableSetOf(filter) else {
-                                                        val set = selectedFilters.toMutableSet()
-                                                        if (set.contains(filter)) set.remove(filter) else set.add(filter)
-                                                        if (set.isEmpty()) setOf("Camera") else set
+                                                    val set = selectedFilters.toMutableSet()
+                                                    if (set.contains(filter)) {
+                                                        set.remove(filter)
+                                                    } else {
+                                                        set.add(filter)
                                                     }
+                                                    val updated = if (set.isEmpty()) setOf("Camera") else set
                                                     selectedFilters = updated
                                                     prefs.selectedFilters = updated
                                                 }
@@ -196,7 +205,7 @@ fun PhotosScreen(
             }
             Spacer(Modifier.height(16.dp))
 
-            if (displayedItems.isEmpty() && allMedia.isNotEmpty()) {
+            if (displayedItems.isEmpty()) {
                 Box(Modifier.fillMaxSize().padding(bottom = 120.dp), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Outlined.Image, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.4f))

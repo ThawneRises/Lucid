@@ -11,6 +11,11 @@ class PreferencesManager(context: Context) {
         set(value) = prefs.edit().putString("sort_mode", value).apply()
 
     var selectedFilters: Set<String>
-        get() = prefs.getStringSet("selected_filters", setOf("Camera")) ?: setOf("Camera")
-        set(value) = prefs.edit().putStringSet("selected_filters", value).apply()
+        get() = prefs.getStringSet("selected_filters", null)
+            ?.takeIf { it.isNotEmpty() }
+            ?: setOf("Camera")
+        set(value) = prefs.edit().putStringSet(
+            "selected_filters",
+            if (value.isEmpty()) setOf("Camera") else value
+        ).apply()
 }

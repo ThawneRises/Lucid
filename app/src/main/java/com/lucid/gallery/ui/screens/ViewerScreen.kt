@@ -1,5 +1,7 @@
 package com.lucid.gallery.ui.screens
 
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -83,18 +85,15 @@ fun ViewerScreen(
             val cameraAlbumId = albums.firstOrNull { it.isDefaultCamera }?.id ?: -1L
             val selectedFilters = prefs.selectedFilters.ifEmpty { setOf("Camera") }
             val sortMode = prefs.sortMode
-            val isAllSelected = selectedFilters.contains("All")
-
-            val filtered = if (isAllSelected) allMedia else {
-                allMedia.filter { item ->
-                    var matches = false
-                    if (selectedFilters.contains("Camera") && item.bucketId == cameraAlbumId) matches = true
-                    if (selectedFilters.contains("Photo") && !item.isVideo) matches = true
-                    if (selectedFilters.contains("Video") && item.isVideo) matches = true
-                    if (selectedFilters.contains("Screenshots") && item.uri.path?.contains("Screenshot", ignoreCase = true) == true) matches = true
-                    matches
+            val selectedBucketIds = selectedFilters.mapNotNull { filter ->
+                if (filter == "Camera") {
+                    cameraAlbumId.takeIf { it != -1L }
+                } else {
+                    albums.firstOrNull { it.name == filter }?.id
                 }
-            }
+            }.toSet()
+
+            val filtered = allMedia.filter { item -> selectedBucketIds.contains(item.bucketId) }
             mediaItems = if (sortMode == "added") filtered.sortedByDescending { it.addedTimestamp } else filtered.sortedByDescending { it.capturedTimestamp }
         } else {
             mediaItems = repo.fetchMediaInAlbum(bucketId)
@@ -106,9 +105,10 @@ fun ViewerScreen(
 
     if (mediaItems.isNotEmpty() && initialIndex != -1) {
         val pagerState = rememberPagerState(initialPage = initialIndex, pageCount = { mediaItems.size })
+        val currentMediaItem = mediaItems.getOrNull(pagerState.currentPage)
 
         LaunchedEffect(pagerState.currentPage) {
-            mediaItems.getOrNull(pagerState.currentPage)?.let { onMediaChanged(it.id) }
+            currentMediaItem?.let { onMediaChanged(it.id) }
         }
 
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
@@ -166,16 +166,44 @@ fun ViewerScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = {}) {
+                    IconButton(onClick = {
+                        currentMediaItem?.let { item ->
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = if (item.isVideo) "video/*" else "image/*"
+                                putExtra(Intent.EXTRA_STREAM, item.uri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(shareIntent, "Share Media"))
+                        }
+                    }) {
                         Icon(Icons.Outlined.Share, contentDescription = "Share", tint = Color.White)
                     }
-                    IconButton(onClick = {}) {
+                    IconButton(onClick = {
+                        currentMediaItem?.let { item ->
+                            val editIntent = Intent(Intent.ACTION_EDIT).apply {
+                                setDataAndType(item.uri, if (item.isVideo) "video/*" else "image/*")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            // Fallback catch if no editor is installed
+                            try {
+                                context.startActivity(Intent.createChooser(editIntent, "Edit Media"))
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "No editor installed", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }) {
                         Icon(Icons.Outlined.Edit, contentDescription = "Edit", tint = Color.White)
                     }
-                    IconButton(onClick = {}) {
+                    IconButton(onClick = {
+                        currentMediaItem?.let { item ->
+                            Toast.makeText(context, "File: ${item.uri.lastPathSegment}", Toast.LENGTH_SHORT).show()
+                        }
+                    }) {
                         Icon(Icons.Outlined.Info, contentDescription = "Info", tint = Color.White)
                     }
-                    IconButton(onClick = {}) {
+                    IconButton(onClick = {
+                        Toast.makeText(context, "Delete functionality pending", Toast.LENGTH_SHORT).show()
+                    }) {
                         Icon(Icons.Outlined.Delete, contentDescription = "Delete", tint = Color.White)
                     }
                 }
@@ -198,30 +226,30 @@ fun VideoPlayerComponent(mediaItem: MediaItem, showControls: Boolean) {
     var duration by remember { mutableFloatStateOf(0f) }
 
     LaunchedEffect(mediaItem.uri) {
-        delay(400.milliseconds)
-        val player = ExoPlayer.Builder(context).build().apply {
-            setMediaItem(ExoMediaItem.fromUri(mediaItem.uri))
-            prepare()
-            playWhenReady = true
-        }
-        exoPlayer = player
-    }
+        delay(350.milliseconds)
 
-    DisposableEffect(exoPlayer) {
-        val listener = object : androidx.media3.common.Player.Listener {
+        val player = ExoPlayer.Builder(context).build()
+        // Attach listener BEFORE prepare() so we catch the STATE_READY signal instantly
+        player.addListener(object : androidx.media3.common.Player.Listener {
             override fun onIsPlayingChanged(isPlayingState: Boolean) {
                 isPlaying = isPlayingState
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == androidx.media3.common.Player.STATE_READY) {
-                    duration = exoPlayer?.duration?.toFloat()?.coerceAtLeast(0f) ?: 0f
+                    duration = player.duration.toFloat().coerceAtLeast(0f)
                     isReady = true
                 }
             }
-        }
-        exoPlayer?.addListener(listener)
+        })
+        player.setMediaItem(ExoMediaItem.fromUri(mediaItem.uri))
+        player.prepare()
+        player.playWhenReady = true
+
+        exoPlayer = player
+    }
+
+    DisposableEffect(exoPlayer) {
         onDispose {
-            exoPlayer?.removeListener(listener)
             exoPlayer?.release()
         }
     }
