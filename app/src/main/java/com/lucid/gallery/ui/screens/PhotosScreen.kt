@@ -73,7 +73,7 @@ fun PhotosScreen(
     var allMedia by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var cameraAlbumId by remember { mutableStateOf(-1L) }
 
-    var selectedFilters by remember { mutableStateOf(prefs.selectedFilters) }
+    var selectedFilters by remember { mutableStateOf(prefs.selectedFilters.ifEmpty { setOf("Camera") }) }
     var sortMode by remember { mutableStateOf(prefs.sortMode) }
     var showMenu by remember { mutableStateOf(false) }
     var isFilterExpanded by remember { mutableStateOf(true) }
@@ -84,7 +84,7 @@ fun PhotosScreen(
         allMedia = repo.fetchAllMedia()
     }
 
-    val isAllSelected = selectedFilters.isEmpty() || selectedFilters.contains("All")
+    val isAllSelected = selectedFilters.contains("All")
 
     val displayedItems = remember(allMedia, selectedFilters, sortMode, cameraAlbumId) {
         val filtered = if (isAllSelected) {
@@ -130,9 +130,7 @@ fun PhotosScreen(
                             Icon(Icons.Outlined.Sort, contentDescription = "Sort and Filter", tint = MaterialTheme.colorScheme.onBackground)
                         }
 
-                        MaterialTheme(
-                            shapes = MaterialTheme.shapes.copy(extraSmall = RoundedCornerShape(24.dp))
-                        ) {
+                        MaterialTheme(shapes = MaterialTheme.shapes.copy(extraSmall = RoundedCornerShape(24.dp))) {
                             DropdownMenu(
                                 expanded = showMenu,
                                 onDismissRequest = { showMenu = false },
@@ -145,42 +143,20 @@ fun PhotosScreen(
                             ) {
                                 DropdownMenuItem(
                                     text = { Text("Sort by recently added", color = MaterialTheme.colorScheme.onSurface) },
-                                    trailingIcon = {
-                                        if (sortMode == "added") Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.onSurface)
-                                    },
-                                    onClick = {
-                                        sortMode = "added"
-                                        prefs.sortMode = "added"
-                                    }
+                                    trailingIcon = { if (sortMode == "added") Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.onSurface) },
+                                    onClick = { sortMode = "added"; prefs.sortMode = "added" }
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Sort by date captured", color = MaterialTheme.colorScheme.onSurface) },
-                                    trailingIcon = {
-                                        if (sortMode == "captured") Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.onSurface)
-                                    },
-                                    onClick = {
-                                        sortMode = "captured"
-                                        prefs.sortMode = "captured"
-                                    }
+                                    trailingIcon = { if (sortMode == "captured") Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.onSurface) },
+                                    onClick = { sortMode = "captured"; prefs.sortMode = "captured" }
                                 )
-
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(vertical = 4.dp),
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f)
-                                )
-
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                                 DropdownMenuItem(
                                     text = { Text("Filter", color = MaterialTheme.colorScheme.onSurface) },
-                                    trailingIcon = {
-                                        Icon(
-                                            if (isFilterExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurface
-                                        )
-                                    },
+                                    trailingIcon = { Icon(if (isFilterExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown, null, tint = MaterialTheme.colorScheme.onSurface) },
                                     onClick = { isFilterExpanded = !isFilterExpanded }
                                 )
-
                                 AnimatedVisibility(
                                     visible = isFilterExpanded,
                                     enter = expandVertically() + fadeIn(),
@@ -189,34 +165,19 @@ fun PhotosScreen(
                                     Column {
                                         DropdownMenuItem(
                                             text = { Text("All", color = MaterialTheme.colorScheme.onSurface) },
-                                            trailingIcon = {
-                                                if (isAllSelected) Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.onSurface)
-                                            },
-                                            onClick = {
-                                                selectedFilters = setOf("All")
-                                                prefs.selectedFilters = setOf("All")
-                                            }
+                                            trailingIcon = { if (isAllSelected) Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.onSurface) },
+                                            onClick = { selectedFilters = setOf("All"); prefs.selectedFilters = setOf("All") }
                                         )
-
-                                        val filterOptions = listOf("Camera", "Photo", "Video", "Screenshots")
-                                        filterOptions.forEach { filter ->
+                                        listOf("Camera", "Photo", "Video", "Screenshots").forEach { filter ->
                                             val isChecked = !isAllSelected && selectedFilters.contains(filter)
                                             DropdownMenuItem(
                                                 text = { Text(filter, color = MaterialTheme.colorScheme.onSurface) },
-                                                trailingIcon = {
-                                                    if (isChecked) Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.onSurface)
-                                                },
+                                                trailingIcon = { if (isChecked) Icon(Icons.Default.Check, null, tint = MaterialTheme.colorScheme.onSurface) },
                                                 onClick = {
-                                                    val updated = if (isAllSelected) {
-                                                        mutableSetOf(filter)
-                                                    } else {
+                                                    val updated = if (isAllSelected) mutableSetOf(filter) else {
                                                         val set = selectedFilters.toMutableSet()
-                                                        if (set.contains(filter)) {
-                                                            set.remove(filter)
-                                                        } else {
-                                                            set.add(filter)
-                                                        }
-                                                        if (set.isEmpty()) setOf("All") else set
+                                                        if (set.contains(filter)) set.remove(filter) else set.add(filter)
+                                                        if (set.isEmpty()) setOf("Camera") else set
                                                     }
                                                     selectedFilters = updated
                                                     prefs.selectedFilters = updated
@@ -247,9 +208,9 @@ fun PhotosScreen(
                 LazyVerticalGrid(
                     state = gridState,
                     columns = GridCells.Fixed(3),
-                    contentPadding = PaddingValues(bottom = 120.dp, start = 2.dp, end = 2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    contentPadding = PaddingValues(start = 6.dp, end = 6.dp, bottom = 120.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
                     items(displayedItems, key = { it.id }) { item ->
@@ -257,6 +218,7 @@ fun PhotosScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(1f)
+                                .clip(RoundedCornerShape(6.dp))
                                 .clickable { onMediaClick(item) }
                         ) {
                             AsyncImage(
@@ -273,7 +235,7 @@ fun PhotosScreen(
                                     modifier = Modifier
                                         .align(Alignment.BottomEnd)
                                         .padding(6.dp)
-                                        .background(Color.Black.copy(alpha = 0.65f), RoundedCornerShape(50))
+                                        .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(50))
                                         .padding(4.dp)
                                 )
                             }
