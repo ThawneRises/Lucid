@@ -9,14 +9,15 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -34,9 +35,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.navigation.NavType
@@ -49,15 +52,15 @@ import coil.ImageLoader
 import coil.decode.VideoFrameDecoder
 import coil.request.CachePolicy
 import com.lucid.gallery.data.MediaItem
-import com.lucid.gallery.ui.components.GlassFloatingNav
+import com.lucid.gallery.ui.components.FloatingNav
 import com.lucid.gallery.ui.screens.AlbumsScreen
 import com.lucid.gallery.ui.screens.PhotosScreen
 import com.lucid.gallery.ui.screens.SearchScreen
 import com.lucid.gallery.ui.screens.ViewerScreen
 import com.lucid.gallery.ui.theme.LucidPhotosTheme
 
-private val NavSpring = spring<IntOffset>(dampingRatio = 0.85f, stiffness = 450f)
-private val AlphaSpring = spring<Float>(dampingRatio = 0.85f, stiffness = 450f)
+private const val NAV_DURATION = 280
+private val NavEasing = CubicBezierEasing(0.2f, 0.85f, 0.4f, 1.0f)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -83,16 +86,28 @@ class MainActivity : ComponentActivity() {
                             navController = navController,
                             startDestination = "home",
                             enterTransition = {
-                                slideInHorizontally(initialOffsetX = { it }, animationSpec = NavSpring) + fadeIn(AlphaSpring)
+                                slideInHorizontally(
+                                    initialOffsetX = { it / 3 },
+                                    animationSpec = tween(NAV_DURATION, easing = NavEasing)
+                                ) + fadeIn(tween(NAV_DURATION, easing = NavEasing))
                             },
                             exitTransition = {
-                                slideOutHorizontally(targetOffsetX = { -it / 3 }, animationSpec = NavSpring) + fadeOut(AlphaSpring)
+                                slideOutHorizontally(
+                                    targetOffsetX = { -it / 4 },
+                                    animationSpec = tween(NAV_DURATION, easing = NavEasing)
+                                ) + fadeOut(tween(NAV_DURATION, easing = NavEasing))
                             },
                             popEnterTransition = {
-                                slideInHorizontally(initialOffsetX = { -it / 3 }, animationSpec = NavSpring) + fadeIn(AlphaSpring)
+                                slideInHorizontally(
+                                    initialOffsetX = { -it / 4 },
+                                    animationSpec = tween(NAV_DURATION, easing = NavEasing)
+                                ) + fadeIn(tween(NAV_DURATION, easing = NavEasing))
                             },
                             popExitTransition = {
-                                slideOutHorizontally(targetOffsetX = { it }, animationSpec = NavSpring) + fadeOut(AlphaSpring)
+                                slideOutHorizontally(
+                                    targetOffsetX = { it / 3 },
+                                    animationSpec = tween(NAV_DURATION, easing = NavEasing)
+                                ) + fadeOut(tween(NAV_DURATION, easing = NavEasing))
                             }
                         ) {
                             composable("home") {
@@ -100,20 +115,17 @@ class MainActivity : ComponentActivity() {
                                     syncedMediaId = syncedMediaId,
                                     onMediaClick = { media ->
                                         syncedMediaId = media.id
-                                        navController.navigate("viewer/${media.bucketId}/${media.id}")
+                                        // Pass -1 to signal to the viewer that we are using the global filtered timeline
+                                        navController.navigate("viewer/-1/${media.id}")
                                     }
                                 )
                             }
                             composable(
                                 route = "viewer/{bucketId}/{mediaId}",
-                                arguments = listOf(
-                                    navArgument("bucketId") { type = NavType.LongType },
-                                    navArgument("mediaId") { type = NavType.LongType }
-                                )
+                                arguments = listOf(navArgument("bucketId") { type = NavType.LongType }, navArgument("mediaId") { type = NavType.LongType })
                             ) { backStackEntry ->
                                 val bucketId = backStackEntry.arguments?.getLong("bucketId") ?: 0L
                                 val mediaId = backStackEntry.arguments?.getLong("mediaId") ?: 0L
-
                                 ViewerScreen(
                                     bucketId = bucketId,
                                     initialMediaId = mediaId,
@@ -130,20 +142,42 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun HomeTabs(
-    syncedMediaId: Long?,
-    onMediaClick: (MediaItem) -> Unit
-) {
+fun HomeTabs(syncedMediaId: Long?, onMediaClick: (MediaItem) -> Unit) {
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    var isNavExpanded by remember { mutableStateOf(true) }
+
+    val nestedScrollConnection = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available.y < -10f) {
+                    isNavExpanded = false
+                } else if (available.y > 15f) {
+                    isNavExpanded = true
+                }
+                return Offset.Zero
+            }
+        }
+    }
 
     val photosGridState = rememberLazyGridState()
 
-    Box(Modifier.fillMaxSize()) {
-        Crossfade(
+    Box(Modifier.fillMaxSize().nestedScroll(nestedScrollConnection)) {
+        AnimatedContent(
             targetState = selectedTab,
-            animationSpec = tween(220),
+            transitionSpec = {
+                val direction = if (targetState > initialState) 1 else -1
+                (slideInHorizontally(
+                    animationSpec = tween(300, easing = FastOutSlowInEasing),
+                    initialOffsetX = { it / 6 * direction }
+                ) + fadeIn(tween(250))).togetherWith(
+                    slideOutHorizontally(
+                        animationSpec = tween(300, easing = FastOutSlowInEasing),
+                        targetOffsetX = { -it / 6 * direction }
+                    ) + fadeOut(tween(250))
+                )
+            },
             modifier = Modifier.fillMaxSize(),
-            label = "tab_crossfade"
+            label = "tab_transition"
         ) { tab ->
             when (tab) {
                 0 -> PhotosScreen(gridState = photosGridState, syncedMediaId = syncedMediaId, onMediaClick = onMediaClick)
@@ -152,15 +186,10 @@ fun HomeTabs(
             }
         }
 
-        GlassFloatingNav(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 32.dp),
-            selectedTab = when (selectedTab) {
-                0 -> "photos"
-                1 -> "albums"
-                else -> "search"
-            },
+        FloatingNav(
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp),
+            selectedTab = when (selectedTab) { 0 -> "photos"; 1 -> "albums"; else -> "search" },
+            isExpanded = isNavExpanded,
             onPhotosClick = { selectedTab = 0 },
             onAlbumsClick = { selectedTab = 1 },
             onSearchClick = { selectedTab = 2 }
@@ -177,13 +206,8 @@ fun PermissionWrapper(onPermissionGranted: @Composable () -> Unit) {
         arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
     }
 
-    var hasPermission by remember {
-        mutableStateOf(permissions.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED })
-    }
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { map ->
-        hasPermission = map.values.all { it }
-    }
-
+    var hasPermission by remember { mutableStateOf(permissions.all { ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED }) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { map -> hasPermission = map.values.all { it } }
     LaunchedEffect(Unit) { if (!hasPermission) launcher.launch(permissions) }
 
     if (hasPermission) {

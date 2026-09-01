@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.lucid.gallery.data.MediaItem
 import com.lucid.gallery.data.MediaStoreRepo
+import com.lucid.gallery.data.PreferencesManager
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -41,13 +42,45 @@ fun ViewerScreen(
 ) {
     val context = LocalContext.current
     val repo = remember { MediaStoreRepo(context) }
+    val prefs = remember { PreferencesManager(context) }
+
     var mediaItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var initialIndex by remember { mutableIntStateOf(-1) }
 
     LaunchedEffect(bucketId) {
-        val items = repo.fetchMediaInAlbum(bucketId)
-        mediaItems = items
-        val index = items.indexOfFirst { it.id == initialMediaId }
+        if (bucketId == -1L) {
+            // Apply global filtering logic from the PhotosScreen
+            val allMedia = repo.fetchAllMedia()
+            val albums = repo.fetchAlbums()
+            val cameraAlbumId = albums.firstOrNull { it.isDefaultCamera }?.id ?: -1L
+            val selectedFilters = prefs.selectedFilters
+            val sortMode = prefs.sortMode
+            val isAllSelected = selectedFilters.isEmpty() || selectedFilters.contains("All")
+
+            val filtered = if (isAllSelected) {
+                allMedia
+            } else {
+                allMedia.filter { item ->
+                    var matches = false
+                    if (selectedFilters.contains("Camera") && item.bucketId == cameraAlbumId) matches = true
+                    if (selectedFilters.contains("Photo") && !item.isVideo) matches = true
+                    if (selectedFilters.contains("Video") && item.isVideo) matches = true
+                    if (selectedFilters.contains("Screenshots") && item.uri.path?.contains("Screenshot", ignoreCase = true) == true) matches = true
+                    matches
+                }
+            }
+
+            mediaItems = if (sortMode == "added") {
+                filtered.sortedByDescending { it.addedTimestamp }
+            } else {
+                filtered.sortedByDescending { it.capturedTimestamp }
+            }
+        } else {
+            // Fetch isolated album
+            mediaItems = repo.fetchMediaInAlbum(bucketId)
+        }
+
+        val index = mediaItems.indexOfFirst { it.id == initialMediaId }
         initialIndex = if (index != -1) index else 0
     }
 
