@@ -115,7 +115,8 @@ class MainActivity : ComponentActivity() {
                                     syncedMediaId = syncedMediaId,
                                     onMediaClick = { media ->
                                         syncedMediaId = media.id
-                                        navController.navigate("viewer/${media.bucketId}/${media.id}")
+                                        // Pass -1 to signal to the viewer that we are using the global filtered timeline
+                                        navController.navigate("viewer/-1/${media.id}")
                                     }
                                 )
                             }
