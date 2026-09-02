@@ -224,7 +224,10 @@ class MediaStoreRepo(private val context: Context) {
                 mediaList.add(
                     MediaItem(
                         id = id,
-                        uri = ContentUris.withAppendedId(queryUri, id),
+                        uri = mediaUri(
+                            ContentUris.withAppendedId(queryUri, id),
+                            mediaType == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
+                        ) ?: ContentUris.withAppendedId(queryUri, id),
                         bucketId = cursor.getLong(bucketIdColumn),
                         timestamp = if (taken > 0L) taken else added,
                         addedTimestamp = added,
@@ -271,7 +274,7 @@ class MediaStoreRepo(private val context: Context) {
                 mediaList.add(
                     MediaItem(
                         id = id,
-                        uri = contentUri,
+                        uri = mediaUri(contentUri, mediaType == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO) ?: contentUri,
                         bucketId = bucketId,
                         timestamp = if (taken > 0L) taken else added,
                         addedTimestamp = added,
