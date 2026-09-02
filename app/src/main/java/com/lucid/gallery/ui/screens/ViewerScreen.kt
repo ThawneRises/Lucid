@@ -1,6 +1,11 @@
 package com.lucid.gallery.ui.screens
 
+import android.content.ContentResolver
+import android.content.Context
 import android.content.Intent
+import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
+import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -33,8 +38,12 @@ import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -56,10 +65,13 @@ import androidx.media3.common.MediaItem as ExoMediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
+import androidx.exifinterface.media.ExifInterface
 import com.lucid.gallery.data.MediaItem
 import com.lucid.gallery.data.MediaStoreRepo
 import com.lucid.gallery.data.PreferencesManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlin.time.Duration.Companion.milliseconds
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -77,6 +89,7 @@ fun ViewerScreen(
     var mediaItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var initialIndex by remember { mutableIntStateOf(-1) }
     var showControls by remember { mutableStateOf(true) }
+    var showInfoSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(bucketId) {
         if (bucketId == -1L) {
@@ -195,9 +208,7 @@ fun ViewerScreen(
                         Icon(Icons.Outlined.Edit, contentDescription = "Edit", tint = Color.White)
                     }
                     IconButton(onClick = {
-                        currentMediaItem?.let { item ->
-                            Toast.makeText(context, "File: ${item.uri.lastPathSegment}", Toast.LENGTH_SHORT).show()
-                        }
+                        showInfoSheet = true
                     }) {
                         Icon(Icons.Outlined.Info, contentDescription = "Info", tint = Color.White)
                     }
@@ -208,10 +219,153 @@ fun ViewerScreen(
                     }
                 }
             }
+
+            if (showInfoSheet && currentMediaItem != null) {
+                MediaInfoSheet(
+                    mediaItem = currentMediaItem,
+                    onDismiss = { showInfoSheet = false }
+                )
+            }
         }
     } else {
         Box(modifier = Modifier.fillMaxSize().background(Color.Black))
     }
+}
+
+private data class MediaInfo(
+    val name: String,
+    val path: String,
+    val type: String,
+    val size: String,
+    val dimensions: String,
+    val date: String,
+    val camera: String,
+    val aperture: String,
+    val exposure: String
+)
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun MediaInfoSheet(mediaItem: MediaItem, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    var info by remember(mediaItem.uri) { mutableStateOf<MediaInfo?>(null) }
+
+    LaunchedEffect(mediaItem.uri) {
+        info = loadMediaInfo(context, mediaItem)
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 24.dp, end = 24.dp, bottom = 32.dp)
+        ) {
+            Text("Media information", style = MaterialTheme.typography.headlineSmall)
+            Spacer(Modifier.size(18.dp))
+            if (info == null) {
+                Text("Loading details...", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                val details = listOf(
+                    "Name" to info!!.name,
+                    "Folder" to info!!.path,
+                    "Type" to info!!.type,
+                    "Size" to info!!.size,
+                    "Dimensions" to info!!.dimensions,
+                    "Date taken" to info!!.date,
+                    "Camera" to info!!.camera,
+                    "Aperture" to info!!.aperture,
+                    "Exposure" to info!!.exposure
+                )
+                details.filter { it.second.isNotBlank() }.forEach { (label, value) ->
+                    Column(modifier = Modifier.padding(vertical = 7.dp)) {
+                        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        Text(value, style = MaterialTheme.typography.bodyLarge)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private suspend fun loadMediaInfo(context: Context, mediaItem: MediaItem): MediaInfo = withContext(Dispatchers.IO) {
+    val contentResolver = context.contentResolver
+    var name = mediaItem.uri.lastPathSegment.orEmpty()
+    var size = ""
+    var type = if (mediaItem.isVideo) "Video" else "Image"
+
+    contentResolver.query(
+        mediaItem.uri,
+        arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE, "mime_type"),
+        null,
+        null,
+        null
+    )?.use { cursor ->
+        val nameColumn = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+        val sizeColumn = cursor.getColumnIndex(OpenableColumns.SIZE)
+        val typeColumn = cursor.getColumnIndex("mime_type")
+        if (cursor.moveToFirst()) {
+            if (nameColumn >= 0) name = cursor.getString(nameColumn) ?: name
+            if (sizeColumn >= 0 && !cursor.isNull(sizeColumn)) size = formatFileSize(cursor.getLong(sizeColumn))
+            if (typeColumn >= 0) type = cursor.getString(typeColumn).orEmpty().ifBlank { type }
+        }
+    }
+
+    var dimensions = ""
+    var date = ""
+    var camera = ""
+    var aperture = ""
+    var exposure = ""
+    val inputStream = contentResolver.openInputStream(mediaItem.uri)
+    if (!mediaItem.isVideo && inputStream != null) {
+        inputStream.use { stream ->
+            val exif = ExifInterface(stream)
+            camera = exif.getAttribute(ExifInterface.TAG_MODEL).orEmpty()
+            aperture = exif.getAttribute(ExifInterface.TAG_F_NUMBER)?.let { "f/$it" }.orEmpty()
+            exposure = exif.getAttribute(ExifInterface.TAG_EXPOSURE_TIME).orEmpty()
+            date = exif.getAttribute(ExifInterface.TAG_DATETIME_ORIGINAL).orEmpty()
+        }
+        contentResolver.openInputStream(mediaItem.uri)?.use { stream ->
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeStream(stream, null, bounds)
+            if (bounds.outWidth > 0 && bounds.outHeight > 0) dimensions = "${bounds.outWidth} x ${bounds.outHeight}"
+        }
+    } else {
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(context, mediaItem.uri)
+            val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+            val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+            if (!width.isNullOrBlank() && !height.isNullOrBlank()) dimensions = "$width x $height"
+            date = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DATE).orEmpty()
+        } finally {
+            retriever.release()
+        }
+    }
+
+    MediaInfo(
+        name = name,
+        path = mediaItem.uri.toString(),
+        type = type,
+        size = size,
+        dimensions = dimensions,
+        date = date,
+        camera = camera,
+        aperture = aperture,
+        exposure = exposure
+    )
+}
+
+private fun formatFileSize(bytes: Long): String = when {
+    bytes < 1024L -> "$bytes B"
+    bytes < 1024L * 1024L -> "%.1f KB".format(bytes / 1024f)
+    bytes < 1024L * 1024L * 1024L -> "%.1f MB".format(bytes / (1024f * 1024f))
+    else -> "%.1f GB".format(bytes / (1024f * 1024f * 1024f))
 }
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
