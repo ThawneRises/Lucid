@@ -26,38 +26,19 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
 
-      - name: Cache Android SDK & Build Files
+      - name: Cache Android SDK & Gradle Files
         uses: actions/cache@v4
         id: cache
         with:
           path: |
             ~/.android/sdk
-            ~/.gradle/caches/build-cache-1
-            ~/.gradle/caches/modules-2
+            ~/.gradle/caches
+            ~/.gradle/wrapper
             build/.gradle
-          key: ${{ runner.os }}-android-build-v1-${{ github.run_number }}-${{ hashFiles('**/build.gradle.kts', '**/libs.versions.toml') }}
+          key: ${{ runner.os }}-gradle-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties') }}-${{ hashFiles('**/*.gradle.kts', '**/libs.versions.toml') }}
           restore-keys: |
-            ${{ runner.os }}-android-build-v1-
-
-      - name: Delete Restored Cache
-        if: steps.cache.outputs.cache-hit == 'true'
-        run: |
-          echo "Deleting restored cache..."
-
-          rm -rf ~/.gradle/caches/modules-2/ 2>/dev/null || true
-          rm -rf ~/.gradle/caches/build-cache-1/ 2>/dev/null || true
-          rm -rf ~/.gradle/caches/*/ 2>/dev/null || true
-
-          rm -rf build/.gradle/ 2>/dev/null || true
-
-          rm -rf ~/.android/sdk/.temp/ 2>/dev/null || true
-          rm -rf ~/.android/sdk/temp/ 2>/dev/null || true
-
-          echo "Restored cache deleted, will create fresh cache at end"
-          echo "Available space:"
-          df -h /home/runner/
+            ${{ runner.os }}-gradle-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties') }}-
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
@@ -74,6 +55,9 @@ jobs:
           keyAlias=${{ secrets.KEY_ALIAS }}
           keyPassword=${{ secrets.KEY_PASSWORD }}
           EOF
+
+      - name: Validate Gradle Wrapper
+        uses: gradle/actions/wrapper-validation@v4
 
       - name: Make Gradle wrapper executable
         run: chmod +x gradlew
