@@ -5,8 +5,11 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
+import android.os.Build
 import android.provider.OpenableColumns
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -14,6 +17,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,16 +37,22 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Favorite
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.RestoreFromTrash
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -52,6 +62,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +73,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem as ExoMediaItem
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
@@ -71,6 +85,7 @@ import com.lucid.gallery.data.MediaStoreRepo
 import com.lucid.gallery.data.PreferencesManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -90,6 +105,15 @@ fun ViewerScreen(
     var initialIndex by remember { mutableIntStateOf(-1) }
     var showControls by remember { mutableStateOf(true) }
     var showInfoSheet by remember { mutableStateOf(false) }
+    var isFavorite by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    val isRecentlyDeleted = bucketId == com.lucid.gallery.ui.screens.RECENTLY_DELETED_BUCKET_ID
+    val coroutineScope = rememberCoroutineScope()
+    val deleteLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) onBack()
+    }
 
     LaunchedEffect(bucketId) {
         if (bucketId == -1L) {
@@ -108,6 +132,8 @@ fun ViewerScreen(
 
             val filtered = allMedia.filter { item -> selectedBucketIds.contains(item.bucketId) }
             mediaItems = if (sortMode == "added") filtered.sortedByDescending { it.addedTimestamp } else filtered.sortedByDescending { it.capturedTimestamp }
+        } else if (isRecentlyDeleted) {
+            mediaItems = repo.fetchTrashedMedia()
         } else {
             mediaItems = repo.fetchMediaInAlbum(bucketId)
         }
@@ -124,10 +150,20 @@ fun ViewerScreen(
             currentMediaItem?.let { onMediaChanged(it.id) }
         }
 
+        LaunchedEffect(currentMediaItem?.uri) {
+            isFavorite = currentMediaItem?.let { repo.isFavorite(it.uri) } ?: false
+        }
+
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
             HorizontalPager(
                 state = pagerState,
-                modifier = Modifier.fillMaxSize().clickable { showControls = !showControls },
+                pageSpacing = 8.dp,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { showControls = !showControls },
                 beyondViewportPageCount = 1,
                 key = { page -> mediaItems.getOrNull(page)?.id ?: page }
             ) { page ->
@@ -147,8 +183,8 @@ fun ViewerScreen(
 
             AnimatedVisibility(
                 visible = showControls,
-                enter = fadeIn(),
-                exit = fadeOut(),
+                enter = fadeIn(tween(160)),
+                exit = fadeOut(tween(120)),
                 modifier = Modifier.align(Alignment.TopStart)
             ) {
                 IconButton(
@@ -165,8 +201,8 @@ fun ViewerScreen(
 
             AnimatedVisibility(
                 visible = showControls,
-                enter = fadeIn(),
-                exit = fadeOut(),
+                enter = fadeIn(tween(160)),
+                exit = fadeOut(tween(120)),
                 modifier = Modifier.align(Alignment.BottomCenter)
             ) {
                 Row(
@@ -179,44 +215,135 @@ fun ViewerScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = {
-                        currentMediaItem?.let { item ->
-                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                type = if (item.isVideo) "video/*" else "image/*"
-                                putExtra(Intent.EXTRA_STREAM, item.uri)
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    if (!isRecentlyDeleted) {
+                        IconButton(onClick = {
+                            currentMediaItem?.let { item ->
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = if (item.isVideo) "video/*" else "image/*"
+                                    putExtra(Intent.EXTRA_STREAM, item.uri)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "Share Media"))
                             }
-                            context.startActivity(Intent.createChooser(shareIntent, "Share Media"))
+                        }) {
+                            Icon(Icons.Outlined.Share, contentDescription = "Share", tint = Color.White)
                         }
-                    }) {
-                        Icon(Icons.Outlined.Share, contentDescription = "Share", tint = Color.White)
-                    }
-                    IconButton(onClick = {
-                        currentMediaItem?.let { item ->
-                            val editIntent = Intent(Intent.ACTION_EDIT).apply {
-                                setDataAndType(item.uri, if (item.isVideo) "video/*" else "image/*")
-                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        IconButton(onClick = {
+                            currentMediaItem?.let { item ->
+                                val editIntent = Intent(Intent.ACTION_EDIT).apply {
+                                    setDataAndType(item.uri, if (item.isVideo) "video/*" else "image/*")
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                try {
+                                    context.startActivity(Intent.createChooser(editIntent, "Edit Media"))
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "No editor installed", Toast.LENGTH_SHORT).show()
+                                }
                             }
-                            // Fallback catch if no editor is installed
-                            try {
-                                context.startActivity(Intent.createChooser(editIntent, "Edit Media"))
-                            } catch (e: Exception) {
-                                Toast.makeText(context, "No editor installed", Toast.LENGTH_SHORT).show()
-                            }
+                        }) {
+                            Icon(Icons.Outlined.Edit, contentDescription = "Edit", tint = Color.White)
                         }
-                    }) {
-                        Icon(Icons.Outlined.Edit, contentDescription = "Edit", tint = Color.White)
+                        IconButton(onClick = {
+                            currentMediaItem?.let { item ->
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                    coroutineScope.launch {
+                                        val updated = repo.setFavorite(item.uri, !isFavorite)
+                                        if (updated) isFavorite = !isFavorite
+                                    }
+                                } else {
+                                    Toast.makeText(context, "Favorites require Android 11 or newer", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }) {
+                            Icon(
+                                imageVector = if (isFavorite) Icons.Outlined.Favorite else Icons.Outlined.FavoriteBorder,
+                                contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                                tint = Color.White
+                            )
+                        }
                     }
                     IconButton(onClick = {
                         showInfoSheet = true
                     }) {
                         Icon(Icons.Outlined.Info, contentDescription = "Info", tint = Color.White)
                     }
-                    IconButton(onClick = {
-                        Toast.makeText(context, "Delete functionality pending", Toast.LENGTH_SHORT).show()
-                    }) {
-                        Icon(Icons.Outlined.Delete, contentDescription = "Delete", tint = Color.White)
+                    if (isRecentlyDeleted) {
+                        IconButton(onClick = {
+                            currentMediaItem?.let { item ->
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                    repo.createPermanentDeleteRequest(item.uri, item.isVideo)?.let { request ->
+                                        deleteLauncher.launch(
+                                            androidx.activity.result.IntentSenderRequest.Builder(request.intentSender).build()
+                                        )
+                                    }
+                                } else {
+                                    Toast.makeText(context, "Permanent delete requires Android 11 or newer", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }) {
+                            Icon(Icons.Outlined.DeleteForever, contentDescription = "Delete permanently", tint = Color.White)
+                        }
+                        IconButton(onClick = {
+                            currentMediaItem?.let { item ->
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                    repo.createRestoreRequest(item.uri, item.isVideo)?.let { request ->
+                                        deleteLauncher.launch(
+                                            androidx.activity.result.IntentSenderRequest.Builder(request.intentSender).build()
+                                        )
+                                    }
+                                } else {
+                                    Toast.makeText(context, "Restore requires Android 11 or newer", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }) {
+                            Icon(Icons.Outlined.RestoreFromTrash, contentDescription = "Restore", tint = Color.White)
+                        }
+                    } else {
+                        IconButton(onClick = {
+                            currentMediaItem?.let { item ->
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                    repo.createTrashRequest(item.uri, item.isVideo)?.let { request ->
+                                        deleteLauncher.launch(
+                                            androidx.activity.result.IntentSenderRequest.Builder(request.intentSender).build()
+                                        )
+                                    } ?: Toast.makeText(
+                                        context,
+                                        "Unable to move this media to Recently deleted",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                } else {
+                                    Toast.makeText(
+                                        context,
+                                        "Recently deleted requires Android 11 or newer",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        }) {
+                            Icon(Icons.Outlined.Delete, contentDescription = "Move to Recently deleted", tint = Color.White)
+                        }
                     }
+                }
+            }
+
+            currentMediaItem?.let { item ->
+                if (showDeleteDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showDeleteDialog = false },
+                        title = { Text("Delete media?") },
+                        text = { Text("This will move the item to Recently deleted.") },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                showDeleteDialog = false
+                                coroutineScope.launch {
+                                    if (repo.delete(item.uri)) onBack()
+                                }
+                            }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
+                        }
+                    )
                 }
             }
 
@@ -372,45 +499,65 @@ private fun formatFileSize(bytes: Long): String = when {
 @Composable
 fun VideoPlayerComponent(mediaItem: MediaItem, showControls: Boolean) {
     val context = LocalContext.current
-    var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
-    var isReady by remember { mutableStateOf(false) }
+    val exoPlayer = remember(mediaItem.uri) {
+        val loadControl = DefaultLoadControl.Builder()
+            .setBufferDurationsMs(2_500, 20_000, 1_000, 2_500)
+            .setBackBuffer(1_000, false)
+            .setPrioritizeTimeOverSizeThresholds(false)
+            .build()
 
-    var isPlaying by remember { mutableStateOf(true) }
+        ExoPlayer.Builder(context)
+            .setLoadControl(loadControl)
+            .setSeekBackIncrementMs(5_000)
+            .setSeekForwardIncrementMs(5_000)
+            .setHandleAudioBecomingNoisy(true)
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                    .build(),
+                true
+            )
+            .build()
+            .apply {
+                repeatMode = ExoPlayer.REPEAT_MODE_OFF
+                videoScalingMode = C.VIDEO_SCALING_MODE_SCALE_TO_FIT
+                setMediaItem(ExoMediaItem.fromUri(mediaItem.uri))
+            }
+    }
+    var isReady by remember { mutableStateOf(false) }
+    var playbackError by remember { mutableStateOf(false) }
+
+    var isPlaying by remember { mutableStateOf(false) }
     var currentPosition by remember { mutableFloatStateOf(0f) }
     var duration by remember { mutableFloatStateOf(0f) }
 
-    LaunchedEffect(mediaItem.uri) {
-        delay(350.milliseconds)
-
-        val player = ExoPlayer.Builder(context).build()
-        // Attach listener BEFORE prepare() so we catch the STATE_READY signal instantly
-        player.addListener(object : androidx.media3.common.Player.Listener {
+    DisposableEffect(exoPlayer) {
+        val listener = object : androidx.media3.common.Player.Listener {
             override fun onIsPlayingChanged(isPlayingState: Boolean) {
                 isPlaying = isPlayingState
             }
             override fun onPlaybackStateChanged(playbackState: Int) {
                 if (playbackState == androidx.media3.common.Player.STATE_READY) {
-                    duration = player.duration.toFloat().coerceAtLeast(0f)
+                    duration = exoPlayer.duration.toFloat().coerceAtLeast(0f)
                     isReady = true
                 }
             }
-        })
-        player.setMediaItem(ExoMediaItem.fromUri(mediaItem.uri))
-        player.prepare()
-        player.playWhenReady = true
-
-        exoPlayer = player
-    }
-
-    DisposableEffect(exoPlayer) {
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                playbackError = true
+            }
+        }
+        exoPlayer.addListener(listener)
+        exoPlayer.prepare()
+        exoPlayer.playWhenReady = true
         onDispose {
-            exoPlayer?.release()
+            exoPlayer.removeListener(listener)
+            exoPlayer.release()
         }
     }
 
     LaunchedEffect(isPlaying, exoPlayer) {
-        while (isPlaying && exoPlayer != null) {
-            currentPosition = exoPlayer?.currentPosition?.toFloat() ?: 0f
+        while (isPlaying) {
+            currentPosition = exoPlayer.currentPosition.toFloat()
             delay(100.milliseconds)
         }
     }
@@ -423,40 +570,59 @@ fun VideoPlayerComponent(mediaItem: MediaItem, showControls: Boolean) {
             modifier = Modifier.fillMaxSize()
         )
 
-        if (exoPlayer != null) {
-            AnimatedVisibility(visible = isReady, enter = fadeIn(tween(300))) {
-                AndroidView(
-                    factory = {
-                        PlayerView(context).apply {
-                            player = exoPlayer
-                            useController = false
-                            setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-                            setBackgroundColor(android.graphics.Color.TRANSPARENT)
-                        }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
+        AnimatedVisibility(visible = isReady, enter = fadeIn(tween(300))) {
+            AndroidView(
+                factory = {
+                    PlayerView(context).apply {
+                        useController = false
+                        controllerAutoShow = false
+                        controllerHideOnTouch = true
+                        controllerShowTimeoutMs = 0
+                        setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                        setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                    }
+                },
+                update = { playerView ->
+                    playerView.player = exoPlayer
+                    playerView.useController = false
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        if (playbackError) {
+            Text(
+                text = "Unable to play this video",
+                color = Color.White,
+                modifier = Modifier.align(Alignment.Center)
+            )
         }
 
         AnimatedVisibility(
-            visible = showControls && isReady,
-            enter = fadeIn(),
-            exit = fadeOut(),
+            visible = showControls && duration > 0f,
+            enter = fadeIn(tween(140)),
+            exit = fadeOut(tween(100)),
             modifier = Modifier.align(Alignment.BottomCenter)
         ) {
             Column(
                 modifier = Modifier
-                    .padding(bottom = 112.dp, start = 24.dp, end = 24.dp)
+                    .padding(bottom = 112.dp, start = 20.dp, end = 20.dp)
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(24.dp))
                     .background(Color(0xFF1A1A1A).copy(alpha = 0.65f))
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = formatVideoTime(currentPosition),
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.width(44.dp)
+                    )
+
                     IconButton(
                         onClick = {
-                            if (isPlaying) exoPlayer?.pause() else exoPlayer?.play()
+                            if (isPlaying) exoPlayer.pause() else exoPlayer.play()
                         },
                         modifier = Modifier
                             .size(40.dp)
@@ -473,21 +639,40 @@ fun VideoPlayerComponent(mediaItem: MediaItem, showControls: Boolean) {
                     Spacer(Modifier.width(12.dp))
 
                     Slider(
-                        value = if (duration > 0f) currentPosition / duration else 0f,
-                        onValueChange = { percent ->
-                            val seekPos = (percent * duration).toLong()
-                            exoPlayer?.seekTo(seekPos)
-                            currentPosition = seekPos.toFloat()
+                        value = currentPosition.coerceIn(0f, duration),
+                        onValueChange = { position ->
+                            currentPosition = position
+                            exoPlayer.seekTo(position.toLong())
                         },
                         modifier = Modifier.weight(1f),
+                        valueRange = 0f..duration,
                         colors = SliderDefaults.colors(
                             thumbColor = Color.White,
                             activeTrackColor = Color.White,
                             inactiveTrackColor = Color.White.copy(alpha = 0.3f)
                         )
                     )
+
+                    Text(
+                        text = formatVideoTime(duration),
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.width(44.dp)
+                    )
                 }
             }
         }
+    }
+}
+
+private fun formatVideoTime(milliseconds: Float): String {
+    val totalSeconds = (milliseconds / 1000f).toInt().coerceAtLeast(0)
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return if (hours > 0) {
+        "%d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%d:%02d".format(minutes, seconds)
     }
 }

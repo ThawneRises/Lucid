@@ -1,5 +1,10 @@
 package com.lucid.gallery.ui.screens
 
+import android.hardware.biometrics.BiometricManager
+import android.hardware.biometrics.BiometricPrompt
+import android.os.Build
+import android.os.CancellationSignal
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -52,11 +57,47 @@ import com.lucid.gallery.ui.theme.TextSecondary
 import com.lucid.gallery.ui.theme.Typography
 
 @Composable
-fun AlbumsScreen(onAlbumClick: (Long, String) -> Unit) {
+fun AlbumsScreen(
+    onAlbumClick: (Long, String) -> Unit,
+    onRecentlyDeletedClick: () -> Unit = {},
+    onSecretFolderClick: () -> Unit = {}
+) {
     val context = LocalContext.current
     val repo = remember { MediaStoreRepo(context) }
     var albums by remember { mutableStateOf<List<Album>>(emptyList()) }
     var isGridView by rememberSaveable { mutableStateOf(true) }
+
+    fun authenticateProtectedFolder(onSuccess: () -> Unit) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return
+        }
+
+        val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
+            BiometricManager.Authenticators.DEVICE_CREDENTIAL
+        val biometricManager = context.getSystemService(BiometricManager::class.java)
+        if (biometricManager == null || biometricManager.canAuthenticate(authenticators) != BiometricManager.BIOMETRIC_SUCCESS) {
+            return
+        }
+
+        val prompt = BiometricPrompt.Builder(context)
+            .setTitle("Unlock protected folder")
+            .setSubtitle("Use fingerprint, face unlock, or your device PIN")
+            .setAllowedAuthenticators(authenticators)
+            .build()
+        prompt.authenticate(
+            CancellationSignal(),
+            context.mainExecutor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult?) {
+                    onSuccess()
+                }
+
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence?) {
+                    Toast.makeText(context, "Secret folder locked", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+    }
 
     LaunchedEffect(Unit) {
         albums = repo.fetchAlbums()
@@ -107,8 +148,12 @@ fun AlbumsScreen(onAlbumClick: (Long, String) -> Unit) {
                     }
 
                     item(span = StaggeredGridItemSpan.FullLine) { Spacer(modifier = Modifier.height(16.dp)) }
-                    item(span = StaggeredGridItemSpan.FullLine) { LockedFolderCard(title = "Hidden") }
-                    item(span = StaggeredGridItemSpan.FullLine) { LockedFolderCard(title = "Recently deleted") }
+                    item(span = StaggeredGridItemSpan.FullLine) {
+                        LockedFolderCard(title = "Secret folder", onClick = { authenticateProtectedFolder(onSecretFolderClick) })
+                    }
+                    item(span = StaggeredGridItemSpan.FullLine) {
+                        LockedFolderCard(title = "Recently deleted", onClick = { authenticateProtectedFolder(onRecentlyDeletedClick) })
+                    }
                 }
             } else {
                 LazyColumn(
@@ -120,8 +165,10 @@ fun AlbumsScreen(onAlbumClick: (Long, String) -> Unit) {
                         AlbumListRow(album = album, onClick = { onAlbumClick(album.id, album.name) })
                     }
                     item { Spacer(modifier = Modifier.height(16.dp)) }
-                    item { LockedFolderCard(title = "Hidden") }
-                    item { LockedFolderCard(title = "Recently deleted") }
+                    item { LockedFolderCard(title = "Secret folder", onClick = { authenticateProtectedFolder(onSecretFolderClick) }) }
+                    item {
+                        LockedFolderCard(title = "Recently deleted", onClick = { authenticateProtectedFolder(onRecentlyDeletedClick) })
+                    }
                 }
             }
         }
