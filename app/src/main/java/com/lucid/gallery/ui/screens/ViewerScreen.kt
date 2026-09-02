@@ -5,8 +5,11 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
+import android.os.Build
 import android.provider.OpenableColumns
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -14,6 +17,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -33,16 +37,22 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.DeleteForever
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Favorite
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.RestoreFromTrash
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -52,6 +62,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,6 +82,7 @@ import com.lucid.gallery.data.MediaStoreRepo
 import com.lucid.gallery.data.PreferencesManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -90,6 +102,15 @@ fun ViewerScreen(
     var initialIndex by remember { mutableIntStateOf(-1) }
     var showControls by remember { mutableStateOf(true) }
     var showInfoSheet by remember { mutableStateOf(false) }
+    var isFavorite by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+    val isRecentlyDeleted = bucketId == com.lucid.gallery.ui.screens.RECENTLY_DELETED_BUCKET_ID
+    val coroutineScope = rememberCoroutineScope()
+    val deleteLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) onBack()
+    }
 
     LaunchedEffect(bucketId) {
         if (bucketId == -1L) {
@@ -108,6 +129,8 @@ fun ViewerScreen(
 
             val filtered = allMedia.filter { item -> selectedBucketIds.contains(item.bucketId) }
             mediaItems = if (sortMode == "added") filtered.sortedByDescending { it.addedTimestamp } else filtered.sortedByDescending { it.capturedTimestamp }
+        } else if (isRecentlyDeleted) {
+            mediaItems = repo.fetchTrashedMedia()
         } else {
             mediaItems = repo.fetchMediaInAlbum(bucketId)
         }
@@ -124,10 +147,19 @@ fun ViewerScreen(
             currentMediaItem?.let { onMediaChanged(it.id) }
         }
 
+        LaunchedEffect(currentMediaItem?.uri) {
+            isFavorite = currentMediaItem?.let { repo.isFavorite(it.uri) } ?: false
+        }
+
         Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
             HorizontalPager(
                 state = pagerState,
-                modifier = Modifier.fillMaxSize().clickable { showControls = !showControls },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) { showControls = !showControls },
                 beyondViewportPageCount = 1,
                 key = { page -> mediaItems.getOrNull(page)?.id ?: page }
             ) { page ->
@@ -179,7 +211,8 @@ fun ViewerScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    IconButton(onClick = {
+                    if (!isRecentlyDeleted) {
+                        IconButton(onClick = {
                         currentMediaItem?.let { item ->
                             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                 type = if (item.isVideo) "video/*" else "image/*"
@@ -188,10 +221,10 @@ fun ViewerScreen(
                             }
                             context.startActivity(Intent.createChooser(shareIntent, "Share Media"))
                         }
-                    }) {
-                        Icon(Icons.Outlined.Share, contentDescription = "Share", tint = Color.White)
-                    }
-                    IconButton(onClick = {
+                        }) {
+                            Icon(Icons.Outlined.Share, contentDescription = "Share", tint = Color.White)
+                        }
+                        IconButton(onClick = {
                         currentMediaItem?.let { item ->
                             val editIntent = Intent(Intent.ACTION_EDIT).apply {
                                 setDataAndType(item.uri, if (item.isVideo) "video/*" else "image/*")
@@ -204,19 +237,110 @@ fun ViewerScreen(
                                 Toast.makeText(context, "No editor installed", Toast.LENGTH_SHORT).show()
                             }
                         }
-                    }) {
-                        Icon(Icons.Outlined.Edit, contentDescription = "Edit", tint = Color.White)
+                        }) {
+                            Icon(Icons.Outlined.Edit, contentDescription = "Edit", tint = Color.White)
+                        }
+                        IconButton(onClick = {
+                        currentMediaItem?.let { item ->
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                coroutineScope.launch {
+                                    val updated = repo.setFavorite(item.uri, !isFavorite)
+                                    if (updated) isFavorite = !isFavorite
+                                }
+                            } else {
+                                Toast.makeText(context, "Favorites require Android 11 or newer", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        }) {
+                            Icon(
+                                imageVector = if (isFavorite) Icons.Outlined.Favorite else Icons.Outlined.FavoriteBorder,
+                                contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                                tint = Color.White
+                            )
+                        }
                     }
                     IconButton(onClick = {
                         showInfoSheet = true
                     }) {
                         Icon(Icons.Outlined.Info, contentDescription = "Info", tint = Color.White)
                     }
-                    IconButton(onClick = {
-                        Toast.makeText(context, "Delete functionality pending", Toast.LENGTH_SHORT).show()
-                    }) {
-                        Icon(Icons.Outlined.Delete, contentDescription = "Delete", tint = Color.White)
+                    if (isRecentlyDeleted) {
+                        IconButton(onClick = {
+                            currentMediaItem?.let { item ->
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                    repo.createPermanentDeleteRequest(item.uri, item.isVideo)?.let { request ->
+                                        deleteLauncher.launch(
+                                            androidx.activity.result.IntentSenderRequest.Builder(request.intentSender).build()
+                                        )
+                                    }
+                                } else {
+                                    Toast.makeText(context, "Permanent delete requires Android 11 or newer", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }) {
+                            Icon(Icons.Outlined.DeleteForever, contentDescription = "Delete permanently", tint = Color.White)
+                        }
+                        IconButton(onClick = {
+                            currentMediaItem?.let { item ->
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                    repo.createRestoreRequest(item.uri, item.isVideo)?.let { request ->
+                                        deleteLauncher.launch(
+                                            androidx.activity.result.IntentSenderRequest.Builder(request.intentSender).build()
+                                        )
+                                    }
+                                } else {
+                                    Toast.makeText(context, "Restore requires Android 11 or newer", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }) {
+                            Icon(Icons.Outlined.RestoreFromTrash, contentDescription = "Restore", tint = Color.White)
+                        }
+                    } else {
+                        IconButton(onClick = {
+                            currentMediaItem?.let { item ->
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                    repo.createTrashRequest(item.uri, item.isVideo)?.let { request ->
+                                        deleteLauncher.launch(
+                                            androidx.activity.result.IntentSenderRequest.Builder(request.intentSender).build()
+                                        )
+                                    } ?: Toast.makeText(
+                                        context,
+                                        "Unable to move this media to Recently deleted",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                } else {
+                                    Toast.makeText(
+                                        context,
+                                        "Recently deleted requires Android 11 or newer",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        }) {
+                            Icon(Icons.Outlined.Delete, contentDescription = "Move to Recently deleted", tint = Color.White)
+                        }
                     }
+                }
+            }
+
+            currentMediaItem?.let { item ->
+                if (showDeleteDialog) {
+                    AlertDialog(
+                        onDismissRequest = { showDeleteDialog = false },
+                        title = { Text("Delete media?") },
+                        text = { Text("This will move the item to Recently deleted.") },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                showDeleteDialog = false
+                                coroutineScope.launch {
+                                    if (repo.delete(item.uri)) onBack()
+                                }
+                            }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
+                        }
+                    )
                 }
             }
 

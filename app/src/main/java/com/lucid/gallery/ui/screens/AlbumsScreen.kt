@@ -52,7 +52,10 @@ import com.lucid.gallery.ui.theme.TextSecondary
 import com.lucid.gallery.ui.theme.Typography
 
 @Composable
-fun AlbumsScreen(onAlbumClick: (Long, String) -> Unit) {
+fun AlbumsScreen(
+    onAlbumClick: (Long, String) -> Unit,
+    onRecentlyDeletedClick: () -> Unit = {}
+) {
     val context = LocalContext.current
     val repo = remember { MediaStoreRepo(context) }
     var albums by remember { mutableStateOf<List<Album>>(emptyList()) }
@@ -107,8 +110,10 @@ fun AlbumsScreen(onAlbumClick: (Long, String) -> Unit) {
                     }
 
                     item(span = StaggeredGridItemSpan.FullLine) { Spacer(modifier = Modifier.height(16.dp)) }
-                    item(span = StaggeredGridItemSpan.FullLine) { LockedFolderCard(title = "Hidden") }
-                    item(span = StaggeredGridItemSpan.FullLine) { LockedFolderCard(title = "Recently deleted") }
+                    item(span = StaggeredGridItemSpan.FullLine) { LockedFolderCard(title = "Secret folder") }
+                    item(span = StaggeredGridItemSpan.FullLine) {
+                        LockedFolderCard(title = "Recently deleted", onClick = onRecentlyDeletedClick)
+                    }
                 }
             } else {
                 LazyColumn(
@@ -120,8 +125,10 @@ fun AlbumsScreen(onAlbumClick: (Long, String) -> Unit) {
                         AlbumListRow(album = album, onClick = { onAlbumClick(album.id, album.name) })
                     }
                     item { Spacer(modifier = Modifier.height(16.dp)) }
-                    item { LockedFolderCard(title = "Hidden") }
-                    item { LockedFolderCard(title = "Recently deleted") }
+                    item { LockedFolderCard(title = "Secret folder") }
+                    item {
+                        LockedFolderCard(title = "Recently deleted", onClick = onRecentlyDeletedClick)
+                    }
                 }
             }
         }

@@ -54,6 +54,7 @@ import com.lucid.gallery.data.MediaItem
 import com.lucid.gallery.ui.components.FloatingNav
 import com.lucid.gallery.ui.screens.AlbumViewScreen
 import com.lucid.gallery.ui.screens.AlbumsScreen
+import com.lucid.gallery.ui.screens.RECENTLY_DELETED_BUCKET_ID
 import com.lucid.gallery.ui.screens.PhotosScreen
 import com.lucid.gallery.ui.screens.SearchScreen
 import com.lucid.gallery.ui.screens.ViewerScreen
@@ -111,6 +112,9 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onAlbumClick = { bucketId, name ->
                                         navController.navigate("album/$bucketId/$name")
+                                    },
+                                    onRecentlyDeletedClick = {
+                                        navController.navigate("album/$RECENTLY_DELETED_BUCKET_ID/Recently%20deleted")
                                     }
                                 )
                             }
@@ -129,7 +133,12 @@ class MainActivity : ComponentActivity() {
                                     albumName = albumName,
                                     onMediaClick = { media ->
                                         syncedMediaId = media.id
-                                        navController.navigate("viewer/${media.bucketId}/${media.id}")
+                                        val viewerBucketId = if (bucketId == RECENTLY_DELETED_BUCKET_ID) {
+                                            RECENTLY_DELETED_BUCKET_ID
+                                        } else {
+                                            media.bucketId
+                                        }
+                                        navController.navigate("viewer/$viewerBucketId/${media.id}")
                                     },
                                     onBack = { navController.popBackStack() }
                                 )
@@ -156,7 +165,12 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun HomeTabs(syncedMediaId: Long?, onMediaClick: (MediaItem) -> Unit, onAlbumClick: (Long, String) -> Unit) {
+fun HomeTabs(
+    syncedMediaId: Long?,
+    onMediaClick: (MediaItem) -> Unit,
+    onAlbumClick: (Long, String) -> Unit,
+    onRecentlyDeletedClick: () -> Unit
+) {
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var isNavExpanded by remember { mutableStateOf(true) }
 
@@ -175,13 +189,16 @@ fun HomeTabs(syncedMediaId: Long?, onMediaClick: (MediaItem) -> Unit, onAlbumCli
     Box(Modifier.fillMaxSize().nestedScroll(nestedScrollConnection)) {
         AnimatedContent(
             targetState = selectedTab,
-            transitionSpec = { fadeIn(tween(150)).togetherWith(fadeOut(tween(150))) },
+                            transitionSpec = { fadeIn(tween(220, easing = CalmEasing)).togetherWith(fadeOut(tween(160, easing = CalmEasing))) },
             modifier = Modifier.fillMaxSize(),
             label = "tab_transition"
         ) { tab ->
             when (tab) {
                 0 -> PhotosScreen(gridState = photosGridState, syncedMediaId = syncedMediaId, onMediaClick = onMediaClick)
-                1 -> AlbumsScreen(onAlbumClick = onAlbumClick)
+                1 -> AlbumsScreen(
+                    onAlbumClick = onAlbumClick,
+                    onRecentlyDeletedClick = onRecentlyDeletedClick
+                )
                 2 -> SearchScreen(onMediaClick = onMediaClick)
             }
         }

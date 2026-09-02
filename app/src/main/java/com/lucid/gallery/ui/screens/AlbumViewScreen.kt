@@ -17,10 +17,15 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.DeleteForever
+import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -28,6 +33,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,6 +47,7 @@ import coil.compose.AsyncImage
 import com.lucid.gallery.data.MediaItem
 import com.lucid.gallery.data.MediaStoreRepo
 import com.lucid.gallery.ui.theme.Typography
+import kotlinx.coroutines.launch
 
 @Composable
 fun AlbumViewScreen(
@@ -52,16 +59,29 @@ fun AlbumViewScreen(
     val context = LocalContext.current
     val repo = remember { MediaStoreRepo(context) }
     var mediaItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var showMenu by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
+    val actionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            coroutineScope.launch { mediaItems = repo.fetchTrashedMedia() }
+        }
+    }
 
     LaunchedEffect(bucketId) {
-        mediaItems = repo.fetchMediaInAlbum(bucketId)
+        mediaItems = if (bucketId == RECENTLY_DELETED_BUCKET_ID) {
+            repo.fetchTrashedMedia()
+        } else {
+            repo.fetchMediaInAlbum(bucketId)
+        }
     }
 
     Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
 
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
-            contentPadding = PaddingValues(top = 100.dp, bottom = 32.dp, start = 6.dp, end = 6.dp),
+            contentPadding = PaddingValues(top = 124.dp, bottom = 32.dp, start = 6.dp, end = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
             modifier = Modifier.fillMaxSize()
@@ -121,6 +141,50 @@ fun AlbumViewScreen(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+            if (bucketId == RECENTLY_DELETED_BUCKET_ID) {
+                Box {
+                    IconButton(onClick = { showMenu = true }) {
+                        Icon(Icons.Outlined.MoreVert, contentDescription = "Recently deleted options", tint = MaterialTheme.colorScheme.onBackground)
+                    }
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Restore all") },
+                            leadingIcon = { Icon(Icons.Outlined.Restore, contentDescription = null) },
+                            enabled = mediaItems.isNotEmpty(),
+                            onClick = {
+                                showMenu = false
+                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                                    repo.createRestoreRequest(mediaItems)?.let { request ->
+                                        actionLauncher.launch(
+                                            androidx.activity.result.IntentSenderRequest.Builder(request.intentSender).build()
+                                        )
+                                    }
+                                }
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Permanently delete all") },
+                            leadingIcon = { Icon(Icons.Outlined.DeleteForever, contentDescription = null) },
+                            enabled = mediaItems.isNotEmpty(),
+                            onClick = {
+                                showMenu = false
+                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                                    repo.createPermanentDeleteRequest(mediaItems)?.let { request ->
+                                        actionLauncher.launch(
+                                            androidx.activity.result.IntentSenderRequest.Builder(request.intentSender).build()
+                                        )
+                                    }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
         }
     }
 }
+
+const val RECENTLY_DELETED_BUCKET_ID = -2L
